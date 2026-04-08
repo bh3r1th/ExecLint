@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from execlint.clients.github_client import GitHubClient
+from execlint.config import MAX_ISSUES_PER_REPO
 from execlint.models import IssueFixSignal, RepoCandidate
 
 KEYWORDS = (
@@ -28,7 +29,7 @@ CATEGORY_BY_KEYWORD = {
 
 
 def mine_issue_signals(repo: RepoCandidate, github: GitHubClient) -> list[IssueFixSignal]:
-    issues = github.list_open_issues(repo.full_name, limit=12)
+    issues = github.list_open_issues(repo.full_name, limit=MAX_ISSUES_PER_REPO)
     ranked: list[tuple[int, IssueFixSignal]] = []
 
     for issue in issues:

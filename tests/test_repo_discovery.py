@@ -3,7 +3,12 @@ from execlint.models import ArxivPaper, RepoCandidate
 
 
 class DummyGitHub:
-    def search_repositories(self, query: str, limit: int = 8) -> list[RepoCandidate]:
+    def search_repositories(
+        self,
+        query: str,
+        limit: int = 8,
+        max_results_inspected: int = 24,
+    ) -> list[RepoCandidate]:
         return [
             RepoCandidate(
                 name="vision-transformer-official",
