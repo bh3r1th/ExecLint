@@ -9,6 +9,8 @@ class ArxivPaper(BaseModel):
     arxiv_id: str
     url: HttpUrl
     title: str | None = None
+    abstract: str | None = None
+    authors: list[str] = Field(default_factory=list)
 
 
 class RepoCandidate(BaseModel):
@@ -19,18 +21,35 @@ class RepoCandidate(BaseModel):
     open_issues_count: int = 0
     has_readme: bool = False
     setup_signals: list[str] = Field(default_factory=list)
+    description: str | None = None
+    owner_login: str | None = None
+    archived: bool = False
+    pushed_at: str | None = None
+    size_kb: int = 0
+    default_branch: str = "main"
+    discovery_score: float = 0.0
+    discovery_reasons: list[str] = Field(default_factory=list)
+    entrypoint_signals: list[str] = Field(default_factory=list)
+    surface_file_count: int = 0
+    readiness_score: float = 0.0
+    readiness_label: Literal["strong", "moderate", "weak"] = "weak"
+    readiness_summary: str = ""
 
 
 class IssueFixSignal(BaseModel):
     blocker: str
     fix: str | None = None
     confidence: Literal["low", "medium", "high"] = "low"
+    issue_number: int | None = None
+    blocker_category: str | None = None
 
 
 class HFModelStatus(BaseModel):
     status: Literal["found", "not_found", "unknown"]
     model_id: str | None = None
+    license: str | None = None
     notes: str | None = None
+    gated: bool | None = None
 
 
 class ExecutionReport(BaseModel):
