@@ -8,7 +8,7 @@ from execlint.analyzers.verdict import build_execution_report
 from execlint.clients.arxiv_client import ArxivClient
 from execlint.clients.github_client import GitHubClient
 from execlint.clients.hf_client import HFClient
-from execlint.models import ExecutionReport
+from execlint.models import ExecutionReport, HFModelStatus, IssueFixSignal, RepoCandidate
 from execlint.utils.text import extract_arxiv_id, normalize_arxiv_url
 
 
@@ -21,10 +21,28 @@ def audit_arxiv_url(arxiv_url: str) -> ExecutionReport:
     hf_client = HFClient()
 
     paper = arxiv_client.fetch_paper(arxiv_id=arxiv_id, url=normalized_url)
-    candidates = discover_repositories(paper=paper, github=github_client)
-    _, best_repo = triage_repositories(candidates=candidates, github=github_client)
 
-    issue_signals = mine_issue_signals(best_repo, github_client) if best_repo else []
-    hf_status = check_hf_status(paper=paper, hf_client=hf_client)
+    candidates: list[RepoCandidate]
+    try:
+        discovered = discover_repositories(paper=paper, github=github_client)
+        candidates, _ = triage_repositories(candidates=discovered, github=github_client)
+    except Exception:
+        candidates = []
 
-    return build_execution_report(best_repo=best_repo, issue_signals=issue_signals, hf_status=hf_status)
+    issue_signals_by_repo: dict[str, list[IssueFixSignal]] = {}
+    for repo in candidates:
+        try:
+            issue_signals_by_repo[repo.full_name] = mine_issue_signals(repo, github_client)
+        except Exception:
+            issue_signals_by_repo[repo.full_name] = []
+
+    try:
+        hf_status = check_hf_status(paper=paper, hf_client=hf_client)
+    except Exception:
+        hf_status = HFModelStatus(status="unknown", notes="HF analyzer failed")
+
+    return build_execution_report(
+        candidates=candidates,
+        issue_signals_by_repo=issue_signals_by_repo,
+        hf_status=hf_status,
+    )

@@ -19,7 +19,14 @@ def audit(arxiv_url: str) -> None:
         typer.secho(f"Audit failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
 
-    typer.echo(report.model_dump_json(indent=2))
+    typer.echo("execution_report:")
+    typer.echo(f"- Verdict: {report.verdict}")
+    typer.echo(f"- TTHW: {report.tthw}")
+    typer.echo(f"- Best Repo: {report.best_repo}")
+    typer.echo(f"- What Breaks: {report.what_breaks}")
+    typer.echo(f"- Fix (if any): {report.fix}")
+    typer.echo(f"- HF Status: {report.hf_status}")
+    typer.echo(f"- Technical Debt: {report.technical_debt}")
 
 
 if __name__ == "__main__":
