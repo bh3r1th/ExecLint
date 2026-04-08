@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 
 import httpx
@@ -16,12 +17,16 @@ class GitHubClient:
             headers["Authorization"] = f"Bearer {token}"
         self._client = httpx.Client(base_url=GITHUB_API_BASE, headers=headers, timeout=timeout)
 
-    def search_repositories(self, query: str, limit: int = 5) -> list[RepoCandidate]:
-        response = self._client.get("/search/repositories", params={"q": query, "sort": "stars", "order": "desc", "per_page": limit})
+    def search_repositories(self, query: str, limit: int = 10) -> list[RepoCandidate]:
+        response = self._client.get(
+            "/search/repositories",
+            params={"q": query, "sort": "stars", "order": "desc", "per_page": limit},
+        )
         response.raise_for_status()
         items = response.json().get("items", [])
         results: list[RepoCandidate] = []
         for item in items:
+            owner = item.get("owner") or {}
             results.append(
                 RepoCandidate(
                     name=item["name"],
@@ -31,6 +36,12 @@ class GitHubClient:
                     open_issues_count=item.get("open_issues_count", 0),
                     has_readme=False,
                     setup_signals=[],
+                    description=item.get("description"),
+                    owner_login=owner.get("login"),
+                    archived=bool(item.get("archived", False)),
+                    pushed_at=item.get("pushed_at"),
+                    size_kb=int(item.get("size", 0) or 0),
+                    default_branch=item.get("default_branch") or "main",
                 )
             )
         return results
@@ -41,12 +52,31 @@ class GitHubClient:
             return None
         response.raise_for_status()
         data = response.json()
-        return data.get("content", "")
+        content = data.get("content", "")
+        if not content:
+            return None
+        encoding = data.get("encoding")
+        if encoding == "base64":
+            try:
+                return base64.b64decode(content).decode("utf-8", errors="ignore")
+            except Exception:
+                return content
+        return content
 
-    def list_open_issues(self, full_name: str, limit: int = 10) -> list[dict]:
+    def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+        response = self._client.get(f"/repos/{full_name}/git/trees/{default_branch}", params={"recursive": 1})
+        if response.status_code == 404 and default_branch != "master":
+            response = self._client.get(f"/repos/{full_name}/git/trees/master", params={"recursive": 1})
+        if response.status_code in (403, 404):
+            return []
+        response.raise_for_status()
+        tree = response.json().get("tree", [])
+        return [item.get("path", "") for item in tree if item.get("path")]
+
+    def list_open_issues(self, full_name: str, limit: int = 12) -> list[dict]:
         response = self._client.get(
             f"/repos/{full_name}/issues",
-            params={"state": "open", "per_page": limit},
+            params={"state": "open", "per_page": limit, "sort": "comments", "direction": "desc"},
         )
         if response.status_code == 404:
             return []
