@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 
 from execlint.clients.github_client import GitHubClient
 from execlint.models import RepoCandidate
-from execlint.utils.ranking import pick_best_repo
 
 SETUP_FILES = ("requirements.txt", "pyproject.toml", "environment.yml", "setup.py")
 ENTRYPOINT_FILES = ("train.py", "infer.py", "inference.py", "demo.py", "app.py")
@@ -51,7 +50,7 @@ def triage_repositories(candidates: list[RepoCandidate], github: GitHubClient) -
                 }
             )
         )
-    return triaged, pick_best_repo(triaged)
+    return triaged, _pick_best_triaged_repo(triaged)
 
 
 def _extract_setup_signals(readme_text: str, paths: list[str]) -> list[str]:
@@ -164,3 +163,36 @@ def _build_summary(
         f"activity={activity}; open_issues={issues}; archived={'yes' if archived else 'no'}; "
         f"surface_files={surface_file_count}; readiness={label}"
     )
+
+
+def _pick_best_triaged_repo(candidates: list[RepoCandidate]) -> RepoCandidate | None:
+    if not candidates:
+        return None
+
+    scored = sorted(
+        candidates,
+        key=lambda repo: (
+            0 if repo.archived else 1,
+            _readiness_rank(repo.readiness_label),
+            repo.readiness_score,
+            min(len(repo.entrypoint_signals), 4),
+            min(len(repo.setup_signals), 4),
+            repo.discovery_score,
+            repo.full_name.lower(),
+        ),
+        reverse=True,
+    )
+
+    best = scored[0]
+    stronger = [repo for repo in scored if repo.readiness_label in {"strong", "moderate"} and not repo.archived]
+    if best.readiness_label == "weak" and stronger:
+        return stronger[0]
+    return best
+
+
+def _readiness_rank(label: str) -> int:
+    if label == "strong":
+        return 3
+    if label == "moderate":
+        return 2
+    return 1

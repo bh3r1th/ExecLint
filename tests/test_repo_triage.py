@@ -102,3 +102,40 @@ def test_official_wording_boost_in_discovery_score() -> None:
 
     assert official_score > plain_score
     assert any("official_wording" in reason for reason in official_reasons)
+
+
+def test_triage_prefers_stronger_repo_over_weak_repo() -> None:
+    candidates = [
+        RepoCandidate(
+            name="good",
+            full_name="org/good",
+            url="https://github.com/org/good",
+            stars=5,
+            pushed_at="2026-02-01T00:00:00Z",
+        ),
+        RepoCandidate(
+            name="weak",
+            full_name="org/weak",
+            url="https://github.com/org/weak",
+            stars=9000,
+            pushed_at="2026-03-01T00:00:00Z",
+        ),
+    ]
+
+    triaged, best = triage_repositories(candidates, DummyGitHub())
+
+    assert len(triaged) == 2
+    assert best is not None
+    assert best.full_name == "org/good"
+
+
+def test_triage_all_weak_is_deterministic() -> None:
+    candidates = [
+        RepoCandidate(name="b", full_name="org/b", url="https://github.com/org/b", stars=1),
+        RepoCandidate(name="a", full_name="org/a", url="https://github.com/org/a", stars=1),
+    ]
+
+    _, best = triage_repositories(candidates, DummyGitHub())
+
+    assert best is not None
+    assert best.full_name == "org/b"
