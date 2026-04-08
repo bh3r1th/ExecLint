@@ -264,6 +264,8 @@ def test_no_repo_no_weights_is_no_go_level_4() -> None:
 
     assert report.verdict == "NO-GO"
     assert report.tthw == "Level 4"
+    assert report.fix == "Unavailable: no repository data"
+    assert report.hf_status == "Hugging Face model missing"
 
 
 def test_moderate_repo_version_pin_fix_stays_caution() -> None:
@@ -293,3 +295,23 @@ def test_moderate_repo_version_pin_fix_stays_caution() -> None:
 
     assert report.verdict == "CAUTION"
     assert report.tthw in {"Level 2", "Level 3"}
+
+
+def test_hf_unknown_wording_is_unclear_not_missing() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="strong",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["run.py"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.hf_status == "Hugging Face status unclear"

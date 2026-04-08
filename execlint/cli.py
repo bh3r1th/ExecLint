@@ -38,13 +38,14 @@ def audit(arxiv_url: str, debug: bool = typer.Option(False, "--debug", help="Pri
 
     if debug:
         typer.echo("debug_signals:")
-        typer.echo(f"- discovered repo count: {debug_signals.get('discovered_repo_count', 0)}")
-        typer.echo(f"- selected repo readiness: {debug_signals.get('selected_repo_readiness', 'n/a')}")
-        categories = debug_signals.get("top_blocker_categories", [])
-        typer.echo(f"- top blocker categories: {', '.join(categories) if categories else 'none'}")
-        typer.echo(f"- hf weights found: {debug_signals.get('hf_weights_found', False)}")
+        typer.echo(f"- repo candidates inspected: {debug_signals.get('candidate_count', 0)}")
+        typer.echo(f"- repo selected: {debug_signals.get('selected_repo_name', 'none')}")
+        typer.echo(f"- readiness: {debug_signals.get('selected_repo_readiness', 'n/a')}")
+        typer.echo(f"- blocker severity: {debug_signals.get('selected_repo_blocker_severity', 'n/a')}")
+        typer.echo(f"- fix signals found: {debug_signals.get('selected_repo_fix_signal_count', 0)}")
+        typer.echo(f"- HF: {debug_signals.get('hf_summary', 'unclear')}")
         failures = debug_signals.get("partial_source_failures", [])
-        typer.echo(f"- partial source failures: {', '.join(failures) if failures else 'none'}")
+        typer.echo(f"- partial failures: {', '.join(failures) if failures else 'none'}")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 class colors:
     RED = "red"
+    YELLOW = "yellow"
 
 
 class Exit(Exception):
@@ -52,6 +53,10 @@ class Typer:
 
 def echo(msg: str) -> None:
     print(msg)
+
+
+def Option(default, *args, **kwargs):
+    return default
 
 
 def secho(msg: str, fg: str | None = None, err: bool = False) -> None:

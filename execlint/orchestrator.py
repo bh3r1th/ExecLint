@@ -24,6 +24,8 @@ PARTIAL_FAILURE_WARNINGS = {
     "budget": "Soft execution budget exceeded; returning partial results",
 }
 
+SEVERITY_LABELS = {0: "n/a", 1: "low", 2: "medium", 3: "high"}
+
 
 def audit_arxiv_url(arxiv_url: str) -> tuple[ExecutionReport, list[str]]:
     report, warnings, _ = audit_arxiv_url_with_debug(arxiv_url)
@@ -67,6 +69,10 @@ def audit_arxiv_url_with_debug(arxiv_url: str) -> tuple[ExecutionReport, list[st
     if not candidates:
         hf_status = HFModelStatus(status="unknown", notes="Skipped due to missing repository candidates")
         report = build_execution_report(candidates=[], issue_signals_by_repo={}, hf_status=hf_status)
+        if "github_discovery" in source_failures:
+            report.what_breaks = "Repository discovery unavailable"
+            report.fix = "Unavailable: GitHub discovery failed"
+            report.technical_debt = "Unknown due to unavailable repository data"
         return report, warnings, _debug_payload(
             discovered=discovered,
             candidates=[],
@@ -110,6 +116,7 @@ def audit_arxiv_url_with_debug(arxiv_url: str) -> tuple[ExecutionReport, list[st
         issue_signals_by_repo=issue_signals_by_repo,
         hf_status=hf_status,
     )
+    _apply_partial_result_wording(report=report, source_failures=source_failures, issue_signals_by_repo=issue_signals_by_repo)
     return report, warnings, _debug_payload(
         discovered=discovered,
         candidates=candidates,
@@ -156,15 +163,40 @@ def _debug_payload(
 
     return {
         "discovered_repo_count": len(discovered),
+        "candidate_count": len(candidates),
+        "selected_repo_name": selected_repo.full_name if selected_repo else "none",
         "selected_repo_readiness": selected_repo.readiness_label if selected_repo else "n/a",
-        "selected_repo_high_signal_issue_count": _high_signal_issue_count(selected_signals),
+        "selected_repo_fix_signal_count": sum(1 for signal in selected_signals if signal.fix and signal.fix.strip()),
         "selected_repo_has_fix_path": _has_credible_fix(selected_signals),
-        "selected_repo_blocker_severity": max((_signal_severity(signal) for signal in selected_signals), default=0),
+        "selected_repo_blocker_severity": SEVERITY_LABELS[max((_signal_severity(signal) for signal in selected_signals), default=0)],
         "top_blocker_categories": [name for name, _ in category_counter.most_common(3)],
-        "hf_weights_found": hf_status.status == "found",
+        "hf_summary": _hf_debug_summary(hf_status),
         "partial_source_failures": list(dict.fromkeys(source_failures)),
     }
 
 
 def _budget_exceeded(started_at: float) -> bool:
     return (monotonic() - started_at) >= SOFT_EXECUTION_BUDGET_SECONDS
+
+
+def _hf_debug_summary(hf_status: HFModelStatus) -> str:
+    if hf_status.status == "found":
+        return "gated" if hf_status.gated else "found"
+    if hf_status.status == "not_found":
+        return "missing"
+    return "unclear"
+
+
+def _apply_partial_result_wording(
+    report: ExecutionReport,
+    source_failures: list[str],
+    issue_signals_by_repo: dict[str, list[IssueFixSignal]],
+) -> None:
+    failures = set(source_failures)
+    if "hf_unavailable" in failures:
+        report.hf_status = "Hugging Face status unavailable"
+
+    if "issue_mining" in failures:
+        has_any_fix = any(signal.fix and signal.fix.strip() for signals in issue_signals_by_repo.values() for signal in signals)
+        if not has_any_fix:
+            report.fix = "Unavailable: issue mining failed"

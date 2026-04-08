@@ -25,10 +25,10 @@ def build_execution_report(
             verdict="NO-GO",
             tthw="Level 4",
             best_repo="None found",
-            what_breaks="No repository candidate discovered",
-            fix="No clear fix found",
+            what_breaks="No repository candidate",
+            fix="Unavailable: no repository data",
             hf_status=_hf_text(hf_status),
-            technical_debt="No credible implementation path",
+            technical_debt="No credible execution path",
         )
 
     issue_signals = issue_signals_by_repo.get(best_repo.full_name, [])
@@ -289,12 +289,12 @@ def _pick_verdict(tthw: str) -> str:
 def _what_breaks(issue_signals: list[IssueFixSignal], repo: RepoCandidate) -> str:
     if issue_signals:
         blockers = [signal.blocker.strip() for signal in issue_signals if signal.blocker.strip()]
-        return "; ".join(blockers[:2]) if blockers else "Issue tracker has unresolved blockers"
+        return "; ".join(blockers[:2]) if blockers else "Issue blockers unresolved"
     if len(repo.setup_signals) < 2:
-        return "Setup path is incomplete"
+        return "Setup path incomplete"
     if not repo.entrypoint_signals:
-        return "No runnable entrypoint signal found"
-    return "No major blocker identified"
+        return "No runnable entrypoint"
+    return "No major blocker"
 
 
 def _fix_summary(issue_signals: list[IssueFixSignal]) -> str:
@@ -306,10 +306,12 @@ def _fix_summary(issue_signals: list[IssueFixSignal]) -> str:
 
 def _hf_text(status: HFModelStatus) -> str:
     if status.status == "found":
-        return f"Model found ({status.model_id or 'unknown id'})"
+        if status.gated:
+            return f"Hugging Face model gated ({status.model_id or 'unknown id'})"
+        return f"Hugging Face model found ({status.model_id or 'unknown id'})"
     if status.status == "not_found":
-        return "No matching model found on Hugging Face"
-    return "Hugging Face status unknown"
+        return "Hugging Face model missing"
+    return "Hugging Face status unclear"
 
 
 def _technical_debt(repo: RepoCandidate, issue_signals: list[IssueFixSignal], hf_status: HFModelStatus) -> str:
