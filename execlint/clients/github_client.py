@@ -16,7 +16,7 @@ from execlint.models import RepoCandidate
 
 class GitHubClient:
     def __init__(self, timeout: float = REQUEST_TIMEOUT_SECONDS) -> None:
-        headers = {"Accept": "application/vnd.github+json"}
+        headers = {"Accept": "application/vnd.github+json, application/vnd.github.squirrel-girl-preview+json"}
         token = os.getenv("GITHUB_TOKEN")
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -93,6 +93,25 @@ class GitHubClient:
         response.raise_for_status()
         tree = response.json().get("tree", [])
         return [item.get("path", "") for item in tree if item.get("path")]
+
+
+    def list_issues_for_mining(self, full_name: str, limit: int = MAX_ISSUES_PER_REPO) -> list[dict]:
+        per_page = max(1, min(limit * 2, 30))
+        response = self._client.get(
+            f"/repos/{full_name}/issues",
+            params={
+                "state": "all",
+                "per_page": per_page,
+                "sort": "comments",
+                "direction": "desc",
+            },
+            timeout=self._timeout,
+        )
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+        issues = [issue for issue in response.json() if "pull_request" not in issue]
+        return issues[: max(1, min(limit, 10))]
 
     def list_open_issues(self, full_name: str, limit: int = MAX_ISSUES_PER_REPO) -> list[dict]:
         response = self._client.get(
