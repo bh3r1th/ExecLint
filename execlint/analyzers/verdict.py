@@ -2,6 +2,17 @@ from __future__ import annotations
 
 from execlint.models import ExecutionReport, HFModelStatus, IssueFixSignal, RepoCandidate
 
+BLOCKER_SEVERITY_SCORE = {"low": 1, "medium": 2, "high": 3}
+CATEGORY_SEVERITY_HINTS: dict[str, str] = {
+    "dependency": "low",
+    "install": "low",
+    "environment": "medium",
+    "api": "medium",
+    "asset": "high",
+    "weights": "high",
+    "checkpoint": "high",
+}
+
 
 def build_execution_report(
     candidates: list[RepoCandidate],
@@ -23,7 +34,7 @@ def build_execution_report(
     issue_signals = issue_signals_by_repo.get(best_repo.full_name, [])
     blocker_severity = _worst_blocker_severity(issue_signals)
     runnable_score = _runnable_signal_score(best_repo)
-    has_fix = _has_issue_fix(issue_signals)
+    has_fix = _has_credible_fix(issue_signals)
 
     tthw = _pick_tthw(
         repo=best_repo,
@@ -52,51 +63,86 @@ def _select_best_repo(
     if not candidates:
         return None
 
-    scored: list[tuple[tuple[float, int, int, int, int, float, str], RepoCandidate]] = []
-    for index, repo in enumerate(candidates):
-        issue_signals = issue_signals_by_repo.get(repo.full_name, [])
-        blocker_severity = _worst_blocker_severity(issue_signals)
-        has_fix = _has_issue_fix(issue_signals)
-        score = (
-            _readiness_points(repo.readiness_label),
-            0 if repo.archived else 1,
-            _runnable_signal_score(repo),
-            len(repo.setup_signals),
-            1 if has_fix else 0,
-            -blocker_severity,
-            _discovery_rank_points(index) + repo.discovery_score,
-            repo.full_name.lower(),
-        )
-        scored.append((score, repo))
+    if len(candidates) == 1:
+        return candidates[0]
 
-    scored.sort(key=lambda item: item[0], reverse=True)
+    scored = sorted(
+        [_repo_selection_key(repo=repo, index=index, issue_signals=issue_signals_by_repo.get(repo.full_name, [])) for index, repo in enumerate(candidates)],
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    strongest_available = [
+        repo
+        for _, repo in scored
+        if repo.readiness_label in {"strong", "moderate"} and not repo.archived
+    ]
     best = scored[0][1]
 
-    moderate_or_strong = [repo for _, repo in scored if repo.readiness_label in {"moderate", "strong"} and not repo.archived]
-    if best.readiness_label == "weak" and moderate_or_strong:
-        contender = moderate_or_strong[0]
-        best_signals = issue_signals_by_repo.get(best.full_name, [])
-        contender_signals = issue_signals_by_repo.get(contender.full_name, [])
-        if not (
-            _has_issue_fix(best_signals)
-            and not _has_issue_fix(contender_signals)
-            and _runnable_signal_score(best) >= _runnable_signal_score(contender) + 2
-        ):
-            return contender
+    if strongest_available:
+        stronger_blocked = all(
+            _is_clearly_blocked(issue_signals_by_repo.get(repo.full_name, []))
+            for repo in strongest_available
+        )
+        if stronger_blocked:
+            weak_with_fix = [
+                repo
+                for _, repo in scored
+                if repo.readiness_label == "weak" and _has_credible_fix(issue_signals_by_repo.get(repo.full_name, []))
+            ]
+            if weak_with_fix:
+                return weak_with_fix[0]
+
+    if best.readiness_label == "weak" and strongest_available:
+        weak_signals = issue_signals_by_repo.get(best.full_name, [])
+        weak_has_fix = _has_credible_fix(weak_signals)
+        if not weak_has_fix:
+            return strongest_available[0]
+
+        stronger_blocked = all(
+            _is_clearly_blocked(issue_signals_by_repo.get(repo.full_name, []))
+            for repo in strongest_available
+        )
+        if not stronger_blocked:
+            return strongest_available[0]
 
     return best
+
+
+def _repo_selection_key(
+    repo: RepoCandidate,
+    index: int,
+    issue_signals: list[IssueFixSignal],
+) -> tuple[tuple[int, int, int, int, int, int, int, float, str], RepoCandidate]:
+    blocker_severity = _worst_blocker_severity(issue_signals)
+    has_fix = _has_credible_fix(issue_signals)
+    high_signal_issue_count = _high_signal_issue_count(issue_signals)
+    blocker_category_rank = _worst_blocker_category_rank(issue_signals)
+
+    score = (
+        0 if repo.archived else 1,
+        _readiness_points(repo.readiness_label),
+        1 if has_fix else 0,
+        -blocker_severity,
+        -blocker_category_rank,
+        high_signal_issue_count,
+        _runnable_signal_score(repo),
+        _discovery_rank_points(index) + repo.discovery_score,
+        repo.full_name.lower(),
+    )
+    return score, repo
 
 
 def _discovery_rank_points(index: int) -> int:
     return max(0, 20 - index)
 
 
-def _readiness_points(label: str) -> float:
+def _readiness_points(label: str) -> int:
     if label == "strong":
-        return 4.0
+        return 3
     if label == "moderate":
-        return 2.5
-    return 1.0
+        return 2
+    return 1
 
 
 def _runnable_signal_score(repo: RepoCandidate) -> int:
@@ -108,15 +154,70 @@ def _runnable_signal_score(repo: RepoCandidate) -> int:
     return score
 
 
+def _signal_blocker_severity(signal: IssueFixSignal) -> int:
+    explicit = BLOCKER_SEVERITY_SCORE.get(signal.confidence, 1)
+    text = f"{signal.blocker_category or ''} {signal.blocker}".lower()
+
+    inferred = 0
+    for hint, label in CATEGORY_SEVERITY_HINTS.items():
+        if hint in text:
+            inferred = max(inferred, BLOCKER_SEVERITY_SCORE[label])
+
+    if any(token in text for token in ("cuda", "environment", "api")) and any(
+        token in text for token in ("mismatch", "drift", "break", "broken", "incompatible")
+    ):
+        inferred = max(inferred, BLOCKER_SEVERITY_SCORE["medium"])
+
+    if any(phrase in text for phrase in ("missing", "broken", "no runnable", "cannot run", "not runnable")):
+        inferred = max(inferred, BLOCKER_SEVERITY_SCORE["high"])
+
+    if inferred >= 3 and not _is_fix_text_credible(signal.fix):
+        return 3
+    return max(explicit, inferred)
+
+
 def _worst_blocker_severity(issue_signals: list[IssueFixSignal]) -> int:
-    severity = {"low": 1, "medium": 2, "high": 3}
     if not issue_signals:
         return 0
-    return max(severity.get(signal.confidence, 1) for signal in issue_signals)
+    return max(_signal_blocker_severity(signal) for signal in issue_signals)
 
 
-def _has_issue_fix(issue_signals: list[IssueFixSignal]) -> bool:
-    return any(bool(signal.fix and signal.fix.strip()) for signal in issue_signals)
+def _worst_blocker_category_rank(issue_signals: list[IssueFixSignal]) -> int:
+    category_rank = {"dependency": 1, "install": 1, "environment": 2, "api": 2, "cuda": 2, "asset": 3, "weights": 3, "checkpoint": 3}
+    if not issue_signals:
+        return 0
+    worst = 0
+    for signal in issue_signals:
+        label = (signal.blocker_category or "").strip().lower()
+        if not label:
+            continue
+        for category, rank in category_rank.items():
+            if category in label:
+                worst = max(worst, rank)
+    return worst
+
+
+def _high_signal_issue_count(issue_signals: list[IssueFixSignal]) -> int:
+    return sum(1 for signal in issue_signals if _signal_blocker_severity(signal) >= 2)
+
+
+def _is_fix_text_credible(fix: str | None) -> bool:
+    if not fix:
+        return False
+    text = fix.strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in ("pin", "install", "download", "set", "use", "upgrade", "fallback", "workaround", "provide"))
+
+
+def _has_credible_fix(issue_signals: list[IssueFixSignal]) -> bool:
+    return any(_is_fix_text_credible(signal.fix) for signal in issue_signals)
+
+
+def _is_clearly_blocked(issue_signals: list[IssueFixSignal]) -> bool:
+    severity = _worst_blocker_severity(issue_signals)
+    has_fix = _has_credible_fix(issue_signals)
+    return severity >= 3 or (severity >= 2 and not has_fix)
 
 
 def _pick_tthw(

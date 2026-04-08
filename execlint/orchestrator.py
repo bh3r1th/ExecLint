@@ -120,6 +120,18 @@ def audit_arxiv_url_with_debug(arxiv_url: str) -> tuple[ExecutionReport, list[st
     )
 
 
+
+def _signal_severity(signal: IssueFixSignal) -> int:
+    return {"low": 1, "medium": 2, "high": 3}.get(signal.confidence, 1)
+
+
+def _has_credible_fix(signals: list[IssueFixSignal]) -> bool:
+    return any(bool(signal.fix and signal.fix.strip()) for signal in signals)
+
+
+def _high_signal_issue_count(signals: list[IssueFixSignal]) -> int:
+    return sum(1 for signal in signals if _signal_severity(signal) >= 2)
+
 def _debug_payload(
     discovered: list[RepoCandidate],
     candidates: list[RepoCandidate],
@@ -140,9 +152,14 @@ def _debug_payload(
             elif signal.blocker and signal.blocker.strip():
                 category_counter["uncategorized"] += 1
 
+    selected_signals = issue_signals_by_repo.get(selected_repo.full_name, []) if selected_repo else []
+
     return {
         "discovered_repo_count": len(discovered),
         "selected_repo_readiness": selected_repo.readiness_label if selected_repo else "n/a",
+        "selected_repo_high_signal_issue_count": _high_signal_issue_count(selected_signals),
+        "selected_repo_has_fix_path": _has_credible_fix(selected_signals),
+        "selected_repo_blocker_severity": max((_signal_severity(signal) for signal in selected_signals), default=0),
         "top_blocker_categories": [name for name, _ in category_counter.most_common(3)],
         "hf_weights_found": hf_status.status == "found",
         "partial_source_failures": list(dict.fromkeys(source_failures)),
