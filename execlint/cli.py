@@ -11,13 +11,17 @@ app = typer.Typer(help="ExecLint CLI")
 def audit(arxiv_url: str) -> None:
     """Audit execution readiness for a single arXiv URL."""
     try:
-        report = audit_arxiv_url(arxiv_url)
+        report, warnings = audit_arxiv_url(arxiv_url)
     except ValueError as exc:
         typer.secho(f"Invalid input: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        raise typer.Exit(code=1) from None
     except Exception as exc:  # pragma: no cover
         typer.secho(f"Audit failed: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2) from exc
+        raise typer.Exit(code=2) from None
+
+    if warnings:
+        warning_text = "; ".join(dict.fromkeys(warnings))
+        typer.secho(f"Warning: {warning_text}", fg=typer.colors.YELLOW, err=True)
 
     typer.echo("execution_report:")
     typer.echo(f"- Verdict: {report.verdict}")

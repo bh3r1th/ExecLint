@@ -4,7 +4,7 @@ import re
 
 import httpx
 
-from execlint.config import HTTP_TIMEOUT_SECONDS
+from execlint.config import REQUEST_TIMEOUT_SECONDS
 from execlint.models import ArxivPaper
 
 ARXIV_OAI_URL = "https://export.arxiv.org/api/query"
@@ -12,13 +12,20 @@ TITLE_RE = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
 class ArxivClient:
-    def __init__(self, timeout: float = HTTP_TIMEOUT_SECONDS) -> None:
+    def __init__(self, timeout: float = REQUEST_TIMEOUT_SECONDS) -> None:
+        self._timeout = timeout
         self._client = httpx.Client(timeout=timeout, follow_redirects=True)
 
     def fetch_paper(self, arxiv_id: str, url: str) -> ArxivPaper:
-        response = self._client.get(ARXIV_OAI_URL, params={"search_query": f"id:{arxiv_id}", "max_results": 1})
+        response = self._client.get(
+            ARXIV_OAI_URL,
+            params={"search_query": f"id:{arxiv_id}", "max_results": 1},
+            timeout=self._timeout,
+        )
         response.raise_for_status()
         title = _extract_title(response.text)
+        if not title:
+            raise ValueError(f"Could not parse paper metadata for arXiv id: {arxiv_id}")
         return ArxivPaper(arxiv_id=arxiv_id, url=url, title=title)
 
 

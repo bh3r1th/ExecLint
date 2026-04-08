@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from execlint.clients.github_client import GitHubClient
+from execlint.config import MAX_GITHUB_SEARCH_RESULTS_INSPECTED, MAX_REPO_CANDIDATES
 from execlint.models import ArxivPaper, RepoCandidate
 
 STOPWORDS = {
@@ -30,7 +31,11 @@ def discover_repositories(paper: ArxivPaper, github: GitHubClient) -> list[RepoC
     seen: set[str] = set()
     scored: list[RepoCandidate] = []
     for query in queries:
-        for repo in github.search_repositories(query=query, limit=8):
+        for repo in github.search_repositories(
+            query=query,
+            limit=MAX_REPO_CANDIDATES,
+            max_results_inspected=MAX_GITHUB_SEARCH_RESULTS_INSPECTED,
+        ):
             if repo.full_name in seen:
                 continue
             score, reasons = _score_repository(repo=repo, paper=paper)
@@ -38,7 +43,7 @@ def discover_repositories(paper: ArxivPaper, github: GitHubClient) -> list[RepoC
             seen.add(repo.full_name)
 
     scored.sort(key=lambda repo: (-repo.discovery_score, -repo.stars, repo.full_name.lower()))
-    return scored[:8]
+    return scored[:MAX_REPO_CANDIDATES]
 
 
 def _build_queries(paper: ArxivPaper) -> list[str]:
