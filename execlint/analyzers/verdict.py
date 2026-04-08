@@ -77,7 +77,11 @@ def _select_best_repo(
         contender = moderate_or_strong[0]
         best_signals = issue_signals_by_repo.get(best.full_name, [])
         contender_signals = issue_signals_by_repo.get(contender.full_name, [])
-        if not (_has_issue_fix(best_signals) and not _has_issue_fix(contender_signals) and _runnable_signal_score(best) >= _runnable_signal_score(contender) + 2):
+        if not (
+            _has_issue_fix(best_signals)
+            and not _has_issue_fix(contender_signals)
+            and _runnable_signal_score(best) >= _runnable_signal_score(contender) + 2
+        ):
             return contender
 
     return best
@@ -125,11 +129,34 @@ def _pick_tthw(
     obvious_runnable_path = repo.has_readme and len(repo.setup_signals) >= 2 and len(repo.entrypoint_signals) >= 1
     weights_available = hf_status.status == "found"
 
-    if obvious_runnable_path and weights_available and blocker_severity <= 1:
+    hard_negatives = 0
+    if repo.readiness_label == "weak":
+        hard_negatives += 1
+    if runnable_score < 3:
+        hard_negatives += 1
+    if blocker_severity >= 3:
+        hard_negatives += 1
+    if hf_status.status != "found":
+        hard_negatives += 1
+    if blocker_severity >= 2 and not has_fix:
+        hard_negatives += 1
+
+    if repo.readiness_label == "weak" and not has_fix and not weights_available:
+        return "Level 4"
+    if hard_negatives >= 4:
+        return "Level 4"
+
+    if obvious_runnable_path and weights_available and blocker_severity <= 1 and hard_negatives <= 1:
         return "Level 1"
-    if runnable_score >= 4 and blocker_severity <= 2 and (has_fix or weights_available):
+    if (
+        runnable_score >= 4
+        and blocker_severity <= 2
+        and (has_fix or weights_available)
+        and hard_negatives <= 2
+        and not (repo.readiness_label == "weak" and not weights_available)
+    ):
         return "Level 2"
-    if runnable_score >= 2:
+    if runnable_score >= 2 and hard_negatives <= 3:
         return "Level 3"
     return "Level 4"
 

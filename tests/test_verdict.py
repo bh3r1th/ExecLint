@@ -1,116 +1,49 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
 from execlint.analyzers.verdict import build_execution_report
 from execlint.models import HFModelStatus, IssueFixSignal, RepoCandidate
 
-
-def test_selects_best_repo_with_readiness_runnable_and_low_blockers() -> None:
-    repo_discovery_top = RepoCandidate(
-        name="top",
-        full_name="org/top",
-        url="https://github.com/org/top",
-        discovery_score=99.0,
-        readiness_label="weak",
-        has_readme=False,
-        setup_signals=[],
-        entrypoint_signals=[],
-    )
-    repo_ready = RepoCandidate(
-        name="ready",
-        full_name="org/ready",
-        url="https://github.com/org/ready",
-        discovery_score=70.0,
-        readiness_label="strong",
-        has_readme=True,
-        setup_signals=["requirements.txt", "pip_install"],
-        entrypoint_signals=["infer.py"],
-    )
-
-    report = build_execution_report(
-        candidates=[repo_discovery_top, repo_ready],
-        issue_signals_by_repo={
-            "org/top": [IssueFixSignal(blocker="Broken", confidence="high")],
-            "org/ready": [IssueFixSignal(blocker="Torch pin needed", fix="Pin torch==2.3", confidence="low")],
-        },
-        hf_status=HFModelStatus(status="found", model_id="org/model"),
-    )
-
-    assert report.best_repo == "https://github.com/org/ready"
-    assert report.verdict == "GO"
-    assert report.tthw == "Level 1"
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "verdict"
 
 
-def test_verdict_no_go_without_repo() -> None:
-    report = build_execution_report(
-        candidates=[],
-        issue_signals_by_repo={},
-        hf_status=HFModelStatus(status="unknown"),
-    )
-
-    assert report.verdict == "NO-GO"
-    assert report.tthw == "Level 4"
-    assert report.best_repo == "None found"
+def _load_case(name: str) -> dict:
+    return json.loads((FIXTURE_DIR / f"{name}.json").read_text())
 
 
-def test_verdict_caution_with_setup_friction() -> None:
-    repo = RepoCandidate(
-        name="demo",
-        full_name="org/demo",
-        url="https://github.com/org/demo",
-        readiness_label="moderate",
-        has_readme=True,
-        setup_signals=["requirements.txt"],
-        entrypoint_signals=["demo.py"],
-    )
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "clear_go",
+        "clear_caution",
+        "clear_no_go",
+        "weak_repo_usable_fix_path",
+        "missing_weights_downgrade",
+    ],
+)
+def test_verdict_golden_fixtures(fixture_name: str) -> None:
+    fixture = _load_case(fixture_name)
+
+    candidates = [RepoCandidate(**candidate) for candidate in fixture["candidates"]]
+    issue_signals_by_repo = {
+        repo_name: [IssueFixSignal(**signal) for signal in signals]
+        for repo_name, signals in fixture["issue_signals_by_repo"].items()
+    }
+    hf_status = HFModelStatus(**fixture["hf_status"])
 
     report = build_execution_report(
-        candidates=[repo],
-        issue_signals_by_repo={
-            "org/demo": [
-                IssueFixSignal(
-                    blocker="Fails on Python 3.12",
-                    fix="Use Python 3.10",
-                    confidence="medium",
-                )
-            ]
-        },
-        hf_status=HFModelStatus(status="not_found"),
+        candidates=candidates,
+        issue_signals_by_repo=issue_signals_by_repo,
+        hf_status=hf_status,
     )
 
-    assert report.verdict == "CAUTION"
-    assert report.tthw == "Level 3"
-    assert report.fix == "Use Python 3.10"
-
-
-def test_best_repo_tie_break_prefers_non_archived_and_dependency_clarity() -> None:
-    archived_repo = RepoCandidate(
-        name="archived",
-        full_name="org/archived",
-        url="https://github.com/org/archived",
-        readiness_label="strong",
-        archived=True,
-        has_readme=True,
-        setup_signals=["requirements.txt", "pyproject.toml"],
-        entrypoint_signals=["train.py"],
-        discovery_score=90,
-    )
-    active_repo = RepoCandidate(
-        name="active",
-        full_name="org/active",
-        url="https://github.com/org/active",
-        readiness_label="strong",
-        archived=False,
-        has_readme=True,
-        setup_signals=["requirements.txt", "pyproject.toml", "setup.py"],
-        entrypoint_signals=["train.py"],
-        discovery_score=85,
-    )
-
-    report = build_execution_report(
-        candidates=[archived_repo, active_repo],
-        issue_signals_by_repo={"org/archived": [], "org/active": []},
-        hf_status=HFModelStatus(status="unknown"),
-    )
-
-    assert report.best_repo == "https://github.com/org/active"
+    assert report.verdict == fixture["expected"]["verdict"]
+    assert report.tthw == fixture["expected"]["tthw"]
+    assert report.best_repo == fixture["expected"]["best_repo"]
 
 
 def test_weak_repo_not_selected_over_moderate_without_clear_fix_advantage() -> None:
