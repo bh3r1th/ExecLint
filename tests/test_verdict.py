@@ -78,3 +78,67 @@ def test_verdict_caution_with_setup_friction() -> None:
     assert report.verdict == "CAUTION"
     assert report.tthw == "Level 3"
     assert report.fix == "Use Python 3.10"
+
+
+def test_best_repo_tie_break_prefers_non_archived_and_dependency_clarity() -> None:
+    archived_repo = RepoCandidate(
+        name="archived",
+        full_name="org/archived",
+        url="https://github.com/org/archived",
+        readiness_label="strong",
+        archived=True,
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["train.py"],
+        discovery_score=90,
+    )
+    active_repo = RepoCandidate(
+        name="active",
+        full_name="org/active",
+        url="https://github.com/org/active",
+        readiness_label="strong",
+        archived=False,
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml", "setup.py"],
+        entrypoint_signals=["train.py"],
+        discovery_score=85,
+    )
+
+    report = build_execution_report(
+        candidates=[archived_repo, active_repo],
+        issue_signals_by_repo={"org/archived": [], "org/active": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.best_repo == "https://github.com/org/active"
+
+
+def test_weak_repo_not_selected_over_moderate_without_clear_fix_advantage() -> None:
+    weak_repo = RepoCandidate(
+        name="weak",
+        full_name="org/weak",
+        url="https://github.com/org/weak",
+        readiness_label="weak",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml", "setup.py"],
+        entrypoint_signals=["train.py", "infer.py", "demo.py"],
+        discovery_score=99,
+    )
+    moderate_repo = RepoCandidate(
+        name="moderate",
+        full_name="org/moderate",
+        url="https://github.com/org/moderate",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["train.py"],
+        discovery_score=70,
+    )
+
+    report = build_execution_report(
+        candidates=[weak_repo, moderate_repo],
+        issue_signals_by_repo={"org/weak": [], "org/moderate": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.best_repo == "https://github.com/org/moderate"
