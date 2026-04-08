@@ -38,6 +38,7 @@ def build_execution_report(
 
     tthw = _pick_tthw(
         repo=best_repo,
+        issue_signals=issue_signals,
         blocker_severity=blocker_severity,
         has_fix=has_fix,
         hf_status=hf_status,
@@ -222,44 +223,59 @@ def _is_clearly_blocked(issue_signals: list[IssueFixSignal]) -> bool:
 
 def _pick_tthw(
     repo: RepoCandidate,
+    issue_signals: list[IssueFixSignal],
     blocker_severity: int,
     has_fix: bool,
     hf_status: HFModelStatus,
     runnable_score: int,
 ) -> str:
-    obvious_runnable_path = repo.has_readme and len(repo.setup_signals) >= 2 and len(repo.entrypoint_signals) >= 1
+    obvious_runnable_path = (
+        repo.has_readme and len(repo.setup_signals) >= 2 and len(repo.entrypoint_signals) >= 1 and runnable_score >= 4
+    )
+    plausible_runnable_path = _has_plausible_runnable_path(repo, runnable_score)
     weights_available = hf_status.status == "found"
+    weights_unclear = hf_status.status in {"unknown", "not_found"}
+    blocker_high_no_fix = blocker_severity >= 3 and not has_fix
+    infra_friction = _has_infra_friction(issue_signals)
 
-    hard_negatives = 0
-    if repo.readiness_label == "weak":
-        hard_negatives += 1
-    if runnable_score < 3:
-        hard_negatives += 1
-    if blocker_severity >= 3:
-        hard_negatives += 1
-    if hf_status.status != "found":
-        hard_negatives += 1
-    if blocker_severity >= 2 and not has_fix:
-        hard_negatives += 1
-
-    if repo.readiness_label == "weak" and not has_fix and not weights_available:
+    if blocker_high_no_fix:
         return "Level 4"
-    if hard_negatives >= 4:
+    if not plausible_runnable_path and weights_unclear and not has_fix:
+        return "Level 4"
+    if repo.readiness_label == "weak" and blocker_severity >= 2 and not has_fix:
         return "Level 4"
 
-    if obvious_runnable_path and weights_available and blocker_severity <= 1 and hard_negatives <= 1:
+    if obvious_runnable_path and weights_available and blocker_severity <= 1 and repo.readiness_label in {"strong", "moderate"}:
         return "Level 1"
-    if (
-        runnable_score >= 4
-        and blocker_severity <= 2
-        and (has_fix or weights_available)
-        and hard_negatives <= 2
-        and not (repo.readiness_label == "weak" and not weights_available)
-    ):
+    if repo.readiness_label in {"strong", "moderate"} and plausible_runnable_path and blocker_severity <= 2:
+        if weights_unclear and blocker_severity >= 1:
+            return "Level 3"
+        if weights_available or has_fix or blocker_severity <= 1:
+            return "Level 2"
+    if plausible_runnable_path and (has_fix or blocker_severity <= 2):
+        if infra_friction or weights_unclear or repo.readiness_label == "weak":
+            return "Level 3"
+    if plausible_runnable_path and blocker_severity <= 2:
         return "Level 2"
-    if runnable_score >= 2 and hard_negatives <= 3:
+    if runnable_score >= 2 or has_fix:
         return "Level 3"
     return "Level 4"
+
+
+def _has_plausible_runnable_path(repo: RepoCandidate, runnable_score: int) -> bool:
+    if not repo.entrypoint_signals:
+        return False
+    if runnable_score >= 4:
+        return True
+    return repo.has_readme and len(repo.setup_signals) >= 1 and runnable_score >= 3
+
+
+def _has_infra_friction(issue_signals: list[IssueFixSignal]) -> bool:
+    for signal in issue_signals:
+        text = f"{signal.blocker_category or ''} {signal.blocker}".lower()
+        if _signal_blocker_severity(signal) >= 2 and any(token in text for token in ("cuda", "version", "fork")):
+            return True
+    return False
 
 
 def _pick_verdict(tthw: str) -> str:
@@ -298,12 +314,16 @@ def _hf_text(status: HFModelStatus) -> str:
 
 def _technical_debt(repo: RepoCandidate, issue_signals: list[IssueFixSignal], hf_status: HFModelStatus) -> str:
     debt_items: list[str] = []
-    if repo.readiness_label != "strong":
-        debt_items.append("readiness not strong")
-    if len(repo.setup_signals) < 2:
-        debt_items.append("setup guidance is thin")
-    if issue_signals:
-        debt_items.append("blocking issues remain open")
+    issue_text = " ".join(
+        f"{signal.blocker_category or ''} {signal.blocker} {signal.fix or ''}".lower()
+        for signal in issue_signals
+    )
+    if "pin" in issue_text or "version" in issue_text:
+        debt_items.append("unresolved version pinning")
     if hf_status.status != "found":
-        debt_items.append("weights availability unclear")
+        debt_items.append("unclear weight provenance")
+    if "fork" in issue_text:
+        debt_items.append("stale fork dependency")
+    if len(repo.setup_signals) < 2 or not repo.has_readme:
+        debt_items.append("missing install instructions")
     return ", ".join(debt_items) if debt_items else "Low unresolved risk"

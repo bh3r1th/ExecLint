@@ -202,3 +202,94 @@ def test_moderate_repo_medium_blocker_with_fix_is_caution() -> None:
 
     assert report.verdict == "CAUTION"
     assert report.tthw in {"Level 2", "Level 3"}
+
+
+def test_strong_repo_missing_weights_with_credible_path_not_no_go() -> None:
+    strong_repo = RepoCandidate(
+        name="strong",
+        full_name="org/strong",
+        url="https://github.com/org/strong",
+        readiness_label="strong",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["infer.py"],
+    )
+
+    report = build_execution_report(
+        candidates=[strong_repo],
+        issue_signals_by_repo={},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.verdict == "CAUTION"
+    assert report.tthw == "Level 2"
+
+
+def test_weak_repo_with_fix_and_gated_weights_is_caution() -> None:
+    weak_repo = RepoCandidate(
+        name="weak",
+        full_name="org/weak",
+        url="https://github.com/org/weak",
+        readiness_label="weak",
+        has_readme=True,
+        setup_signals=["requirements.txt", "README usage"],
+        entrypoint_signals=["run.py"],
+    )
+
+    report = build_execution_report(
+        candidates=[weak_repo],
+        issue_signals_by_repo={
+            "org/weak": [
+                IssueFixSignal(
+                    blocker="Weights are gated",
+                    fix="Request access and use provided token to download",
+                    confidence="medium",
+                    blocker_category="weights",
+                )
+            ]
+        },
+        hf_status=HFModelStatus(status="not_found", gated=True),
+    )
+
+    assert report.verdict == "CAUTION"
+    assert report.tthw == "Level 3"
+
+
+def test_no_repo_no_weights_is_no_go_level_4() -> None:
+    report = build_execution_report(
+        candidates=[],
+        issue_signals_by_repo={},
+        hf_status=HFModelStatus(status="not_found"),
+    )
+
+    assert report.verdict == "NO-GO"
+    assert report.tthw == "Level 4"
+
+
+def test_moderate_repo_version_pin_fix_stays_caution() -> None:
+    moderate_repo = RepoCandidate(
+        name="moderate",
+        full_name="org/mod",
+        url="https://github.com/org/mod",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["train.py"],
+    )
+    report = build_execution_report(
+        candidates=[moderate_repo],
+        issue_signals_by_repo={
+            "org/mod": [
+                IssueFixSignal(
+                    blocker="CUDA and version mismatch after upstream change",
+                    fix="Pin torch/cu121 wheels and set transformers==4.39",
+                    confidence="medium",
+                    blocker_category="cuda version",
+                )
+            ]
+        },
+        hf_status=HFModelStatus(status="found", model_id="org/model"),
+    )
+
+    assert report.verdict == "CAUTION"
+    assert report.tthw in {"Level 2", "Level 3"}
