@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 
 from execlint.clients.github_client import GitHubClient
 from execlint.config import MAX_GITHUB_SEARCH_RESULTS_INSPECTED, MAX_REPO_CANDIDATES
@@ -22,7 +23,12 @@ STOPWORDS = {
     "using",
     "via",
 }
-OFFICIAL_TERMS = ("official", "official implementation", "authors", "paper")
+OFFICIAL_TERMS = (
+    "official implementation",
+    "official code",
+    "authors",
+)
+WEAK_TEMPLATE_TERMS = ("template", "boilerplate", "demo only", "starter")
 
 
 def discover_repositories(paper: ArxivPaper, github: GitHubClient) -> list[RepoCandidate]:
@@ -52,6 +58,7 @@ def _build_queries(paper: ArxivPaper) -> list[str]:
         title = " ".join(paper.title.split())
         queries.append(f'"{title}"')
         queries.append(f"{title} official implementation")
+        queries.append(f"code for {title}")
         head = " ".join(title.split()[:6])
         if head and head != title:
             queries.append(head)
@@ -67,6 +74,7 @@ def _build_queries(paper: ArxivPaper) -> list[str]:
 
 def _score_repository(repo: RepoCandidate, paper: ArxivPaper) -> tuple[float, list[str]]:
     title_tokens = _tokens(paper.title or "")
+    keyword_tokens = _tokens(f"{paper.title or ''} {paper.abstract or ''}")
     desc_tokens = _tokens(repo.description or "")
     name_tokens = _tokens(repo.name)
     owner_tokens = _tokens(repo.owner_login or "")
@@ -76,33 +84,84 @@ def _score_repository(repo: RepoCandidate, paper: ArxivPaper) -> tuple[float, li
 
     name_overlap = _overlap_ratio(title_tokens, name_tokens)
     if name_overlap > 0:
-        points = round(70 * name_overlap, 2)
+        points = round(80 * name_overlap, 2)
         score += points
         reasons.append(f"name_overlap={name_overlap:.2f}(+{points})")
 
-    description_overlap = _overlap_ratio(title_tokens, desc_tokens)
+    description_overlap = _overlap_ratio(keyword_tokens, desc_tokens)
     if description_overlap > 0:
-        points = round(35 * description_overlap, 2)
+        points = round(45 * description_overlap, 2)
         score += points
         reasons.append(f"description_overlap={description_overlap:.2f}(+{points})")
 
     author_owner = _author_owner_match(paper.authors, owner_tokens)
     if author_owner > 0:
-        points = round(30 * author_owner, 2)
+        points = round(35 * author_owner, 2)
         score += points
         reasons.append(f"owner_author_match={author_owner:.2f}(+{points})")
 
-    official_text = f"{repo.name} {repo.description or ''}".lower()
-    if any(term in official_text for term in OFFICIAL_TERMS):
-        score += 20
-        reasons.append("official_wording(+20)")
+    official_points = _official_wording_points(repo, paper)
+    if official_points > 0:
+        score += official_points
+        reasons.append(f"official_wording(+{official_points})")
 
     star_bonus = min(repo.stars, 4000) / 500
     if star_bonus > 0:
         score += star_bonus
         reasons.append(f"star_bonus(+{star_bonus:.2f})")
 
+    if repo.archived:
+        score -= 25
+        reasons.append("archived_penalty(-25)")
+
+    if repo.size_kb <= 15:
+        score -= 10
+        reasons.append("tiny_surface_penalty(-10)")
+
+    if _is_likely_inactive_fork(repo):
+        score -= 16
+        reasons.append("inactive_fork_penalty(-16)")
+
+    if name_overlap < 0.2 and _looks_template_only(repo):
+        score -= 10
+        reasons.append("template_only_penalty(-10)")
+
     return round(score, 2), reasons
+
+
+def _official_wording_points(repo: RepoCandidate, paper: ArxivPaper) -> float:
+    haystack = f"{repo.name} {repo.description or ''}".lower()
+    if any(term in haystack for term in OFFICIAL_TERMS):
+        return 18
+    title = (paper.title or "").strip().lower()
+    if title and f"code for {title}" in haystack:
+        return 20
+    return 0
+
+
+def _is_likely_inactive_fork(repo: RepoCandidate) -> bool:
+    text = f"{repo.name} {repo.description or ''}".lower()
+    mentions_fork = "fork" in text
+    if not mentions_fork:
+        return False
+    if repo.stars > 80:
+        return False
+    return _is_stale(repo.pushed_at)
+
+
+def _looks_template_only(repo: RepoCandidate) -> bool:
+    text = f"{repo.name} {repo.description or ''}".lower()
+    return any(term in text for term in WEAK_TEMPLATE_TERMS)
+
+
+def _is_stale(pushed_at: str | None) -> bool:
+    if not pushed_at:
+        return True
+    try:
+        pushed = datetime.fromisoformat(pushed_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (datetime.now(UTC) - pushed).days > 365
 
 
 def _author_owner_match(authors: list[str], owner_tokens: set[str]) -> float:
@@ -114,7 +173,6 @@ def _author_owner_match(authors: list[str], owner_tokens: set[str]) -> float:
         parts = [p for p in clean.split() if len(p) > 2 and p not in STOPWORDS]
         if parts:
             author_tokens.add(parts[-1])
-            author_tokens.update(parts)
 
     if not author_tokens:
         return 0.0

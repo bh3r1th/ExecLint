@@ -17,14 +17,16 @@ def triage_repositories(candidates: list[RepoCandidate], github: GitHubClient) -
         paths = github.get_repo_file_paths(candidate.full_name, default_branch=candidate.default_branch)
         setup_signals = _extract_setup_signals(readme or "", paths)
         entrypoints = _extract_entrypoints(paths)
+        activity_score = _activity_score(candidate.pushed_at)
         readiness_score, readiness_label = _compute_readiness(
             has_readme=bool(readme),
             setup_count=len(setup_signals),
             entrypoint_count=len(entrypoints),
-            activity_score=_activity_score(candidate.pushed_at),
+            activity_score=activity_score,
             open_issues_count=candidate.open_issues_count,
             archived=candidate.archived,
             surface_file_count=len(paths),
+            likely_inactive_fork=_is_likely_inactive_fork(candidate, activity_score),
         )
         summary = _build_summary(
             has_readme=bool(readme),
@@ -100,6 +102,11 @@ def _activity_bucket(pushed_at: str | None) -> str:
     return "unknown"
 
 
+def _is_likely_inactive_fork(candidate: RepoCandidate, activity_score: float) -> bool:
+    text = f"{candidate.name} {candidate.description or ''}".lower()
+    return "fork" in text and activity_score <= 0.3
+
+
 def _compute_readiness(
     has_readme: bool,
     setup_count: int,
@@ -108,22 +115,29 @@ def _compute_readiness(
     open_issues_count: int,
     archived: bool,
     surface_file_count: int,
+    likely_inactive_fork: bool = False,
 ) -> tuple[float, str]:
     score = 0.0
     score += 2.0 if has_readme else 0.0
-    score += min(setup_count, 4) * 1.5
-    score += min(entrypoint_count, 3) * 1.0
+    score += min(setup_count, 4) * 1.6
+    score += min(entrypoint_count, 4) * 1.3
     score += activity_score * 2.0
     if archived:
         score -= 3.0
+    if likely_inactive_fork:
+        score -= 2.0
+    if not has_readme and setup_count == 0:
+        score -= 1.8
+    if surface_file_count <= 3:
+        score -= 1.5
+    elif surface_file_count > 800:
+        score -= 1.0
+    elif surface_file_count > 300:
+        score -= 0.4
     if open_issues_count > 150:
         score -= 1.5
     elif open_issues_count > 50:
         score -= 0.7
-    if surface_file_count > 800:
-        score -= 1.0
-    elif surface_file_count > 300:
-        score -= 0.4
 
     if score >= 6.5:
         label = "strong"

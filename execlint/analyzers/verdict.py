@@ -52,41 +52,53 @@ def _select_best_repo(
     if not candidates:
         return None
 
-    scored: list[tuple[tuple[int, int, int, int, int, float, str], RepoCandidate]] = []
+    scored: list[tuple[tuple[float, int, int, int, int, float, str], RepoCandidate]] = []
     for index, repo in enumerate(candidates):
         issue_signals = issue_signals_by_repo.get(repo.full_name, [])
         blocker_severity = _worst_blocker_severity(issue_signals)
+        has_fix = _has_issue_fix(issue_signals)
         score = (
             _readiness_points(repo.readiness_label),
+            0 if repo.archived else 1,
             _runnable_signal_score(repo),
+            len(repo.setup_signals),
+            1 if has_fix else 0,
             -blocker_severity,
-            1 if _has_issue_fix(issue_signals) else 0,
-            _discovery_rank_points(index),
-            repo.discovery_score,
+            _discovery_rank_points(index) + repo.discovery_score,
             repo.full_name.lower(),
         )
         scored.append((score, repo))
 
     scored.sort(key=lambda item: item[0], reverse=True)
-    return scored[0][1]
+    best = scored[0][1]
+
+    moderate_or_strong = [repo for _, repo in scored if repo.readiness_label in {"moderate", "strong"} and not repo.archived]
+    if best.readiness_label == "weak" and moderate_or_strong:
+        contender = moderate_or_strong[0]
+        best_signals = issue_signals_by_repo.get(best.full_name, [])
+        contender_signals = issue_signals_by_repo.get(contender.full_name, [])
+        if not (_has_issue_fix(best_signals) and not _has_issue_fix(contender_signals) and _runnable_signal_score(best) >= _runnable_signal_score(contender) + 2):
+            return contender
+
+    return best
 
 
 def _discovery_rank_points(index: int) -> int:
     return max(0, 20 - index)
 
 
-def _readiness_points(label: str) -> int:
+def _readiness_points(label: str) -> float:
     if label == "strong":
-        return 3
+        return 4.0
     if label == "moderate":
-        return 2
-    return 1
+        return 2.5
+    return 1.0
 
 
 def _runnable_signal_score(repo: RepoCandidate) -> int:
     score = 0
-    score += min(len(repo.setup_signals), 3)
-    score += min(len(repo.entrypoint_signals), 2)
+    score += min(len(repo.setup_signals), 4)
+    score += min(len(repo.entrypoint_signals), 4)
     if repo.has_readme:
         score += 1
     return score
