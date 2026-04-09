@@ -219,22 +219,22 @@ def test_cli_output_format_is_stable_and_repo_url_is_required_internally(monkeyp
         app(["https://arxiv.org/abs/1234.5678", "--repo", "https://github.com/org/demo"])
 
     out = stdout.getvalue().splitlines()
-    assert out[:10] == [
+    assert out[:13] == [
         "paper:",
         "- Title: Demo Paper",
         "- Code URL: https://github.com/org/demo",
         "execution_report:",
-        "- Verdict: GO",
-        "- Time-to-Hello-World (TTHW): Level 1 — runnable immediately",
-        "- Runnable For: demo",
         "- Execution Path: No extracted execution commands",
+        "- Runnable For: demo",
         "- Gaps: None identified",
-        "- Not Clearly Supported: None identified",
-    ]
-    assert out[10:12] == [
         "- What Breaks: No concrete blocker visible",
+        "- Technical Debt: None identified",
+        "- Not Clearly Supported: None identified",
+        "- HF Status: Hugging Face model found (org/model)",
         "- Fix (if any): No clear fix found",
+        "- Verdict: GO",
     ]
+    assert out[13] == "- Time-to-Hello-World (TTHW): Level 1 — runnable immediately"
 
 
 @pytest.mark.parametrize(

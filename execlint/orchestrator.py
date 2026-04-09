@@ -312,12 +312,14 @@ def _report_breaker_severity(what_breaks: str) -> int:
     if any(
         token in text
         for token in (
-            "external checkpoints/weights not linked",
-            "no clear install path",
+            "checkpoint link absent",
+            "install path ambiguous",
             "dataset must be supplied manually",
             "environment/cuda/version ambiguity",
             "no clear runnable entrypoint",
             "no clear inference/demo entrypoint",
+            "no clear inference/demo command",
+            "no clear run command",
         )
     ):
         return 2

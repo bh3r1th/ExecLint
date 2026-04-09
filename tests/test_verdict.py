@@ -172,7 +172,7 @@ def test_no_fix_weak_repo_missing_weights_is_no_go() -> None:
 
     assert report.verdict == "NO-GO"
     assert report.tthw == "Level 4"
-    assert report.what_breaks == "Missing weights and cannot run inference; no obvious runnable entrypoint for any meaningful capability"
+    assert report.what_breaks == "Missing weights and cannot run inference; checkpoint link absent"
 
 
 def test_moderate_repo_medium_blocker_with_fix_is_caution() -> None:
@@ -397,7 +397,7 @@ def test_smoke_test_only_repo_reflects_limited_reality() -> None:
     )
 
     assert report.verdict == "CAUTION"
-    assert "repo appears limited to smoke tests" in report.technical_debt
+    assert report.technical_debt == "None identified"
     assert report.not_clearly_supported == "demo, inference, training, evaluation"
 
 
@@ -600,7 +600,7 @@ def test_blockers_trigger_nontrivial_severity_and_precise_debt() -> None:
         hf_status=HFModelStatus(status="not_found"),
     )
 
-    assert report.what_breaks == "no clear install path; no clear runnable entrypoint"
+    assert report.what_breaks == "install path ambiguous; no clear runnable entrypoint"
     assert report.technical_debt == "install path ambiguous"
 
 
@@ -622,7 +622,7 @@ def test_missing_weights_shown_only_when_repo_likely_depends_on_them() -> None:
         hf_status=HFModelStatus(status="not_found"),
     )
 
-    assert report.what_breaks == "external checkpoints/weights not linked"
+    assert report.what_breaks == "checkpoint link absent"
     assert "checkpoint provenance unclear" in report.technical_debt
 
 
@@ -698,3 +698,75 @@ def test_missing_execution_path_surfaces_clear_gap_text() -> None:
     assert report.execution_path == "No extracted execution commands"
     assert report.gaps == "install path ambiguous; no clear run command"
     assert report.tthw == "Level 3"
+
+
+def test_caution_report_stays_evidence_backed() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["run.py"],
+        inferred_capabilities=["inference"],
+        execution_steps={"install": ["pip install -r requirements.txt"], "run": ["python run.py"]},
+        gaps=["dataset must be supplied manually"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.verdict == "CAUTION"
+    assert report.what_breaks == "dataset must be supplied manually"
+    assert report.technical_debt == "dataset bootstrap manual"
+
+
+def test_execution_sequence_lowers_tthw() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["run.py", "eval.py"],
+        inferred_capabilities=["inference", "evaluation"],
+        execution_steps={
+            "install": ["pip install -r requirements.txt"],
+            "run": ["python run.py"],
+            "evaluate": ["python eval.py"],
+        },
+    )
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+    assert report.tthw == "Level 1"
+
+
+def test_generic_filler_not_emitted_when_execution_sequence_exists() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="strong",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["run.py"],
+        inferred_capabilities=["inference"],
+        execution_steps={"install": ["pip install -r requirements.txt"], "run": ["python run.py"]},
+        gaps=["no clear run command"],
+    )
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="found", model_id="org/model"),
+    )
+    assert "No concrete blocker visible" not in report.what_breaks
+    assert "no obvious runnable entrypoint" not in report.what_breaks
+    assert report.what_breaks == "no clear run command"
