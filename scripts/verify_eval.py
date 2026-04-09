@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from execlint.clients.arxiv_client import normalize_arxiv_input
 from execlint.models import ExecutionInput
 from execlint.orchestrator import audit_execution_input
 
@@ -60,7 +61,12 @@ def main() -> int:
             actual = report.verdict
             _ = report.tthw
         except Exception as exc:
-            print(f"{name} | {expected} | ERROR | FAIL ({exc})")
+            normalized_arxiv_id = "unknown"
+            try:
+                normalized_arxiv_id, _ = normalize_arxiv_input(entry["arxiv_url"])
+            except Exception:
+                pass
+            print(f"{name} | {expected} | ERROR | FAIL | arxiv_id={normalized_arxiv_id} ({exc})")
             fail_count += 1
             continue
 

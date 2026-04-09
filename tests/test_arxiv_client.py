@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from execlint.clients.arxiv_client import ArxivClient
+from execlint.clients.arxiv_client import ArxivClient, normalize_arxiv_input
 
 
 SAMPLE_ARXIV_HTML = """
@@ -74,3 +74,31 @@ def test_fetch_paper_sets_none_when_no_github_link_exists(monkeypatch) -> None:
     assert paper.abstract == "No GitHub URL is present on this page."
     assert paper.code_url is None
     assert paper.code_url_source == "none"
+
+
+def test_normalize_arxiv_input_abs_url() -> None:
+    arxiv_id, abs_url = normalize_arxiv_input("https://arxiv.org/abs/2106.09685")
+
+    assert arxiv_id == "2106.09685"
+    assert abs_url == "https://arxiv.org/abs/2106.09685"
+
+
+def test_normalize_arxiv_input_pdf_url() -> None:
+    arxiv_id, abs_url = normalize_arxiv_input("https://arxiv.org/pdf/2106.09685")
+
+    assert arxiv_id == "2106.09685"
+    assert abs_url == "https://arxiv.org/abs/2106.09685"
+
+
+def test_normalize_arxiv_input_raw_id() -> None:
+    arxiv_id, abs_url = normalize_arxiv_input("2106.09685")
+
+    assert arxiv_id == "2106.09685"
+    assert abs_url == "https://arxiv.org/abs/2106.09685"
+
+
+def test_normalize_arxiv_input_versioned_id() -> None:
+    arxiv_id, abs_url = normalize_arxiv_input("2106.09685v2")
+
+    assert arxiv_id == "2106.09685"
+    assert abs_url == "https://arxiv.org/abs/2106.09685"

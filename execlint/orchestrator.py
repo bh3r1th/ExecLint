@@ -10,12 +10,11 @@ from execlint.analyzers.issue_miner import mine_issue_signals
 from execlint.analyzers.repo_discovery import discover_repositories
 from execlint.analyzers.repo_triage import triage_repositories
 from execlint.analyzers.verdict import build_execution_report
-from execlint.clients.arxiv_client import ArxivClient
+from execlint.clients.arxiv_client import ArxivClient, normalize_arxiv_input
 from execlint.clients.github_client import GitHubClient
 from execlint.clients.hf_client import HFClient
 from execlint.config import SOFT_EXECUTION_BUDGET_SECONDS
 from execlint.models import ArxivPaper, ExecutionInput, ExecutionReport, HFModelStatus, IssueFixSignal, RepoCandidate
-from execlint.utils.text import extract_arxiv_id, normalize_arxiv_url
 
 
 PARTIAL_FAILURE_WARNINGS = {
@@ -50,8 +49,8 @@ def _audit_with_debug(
     arxiv_url: str,
     execution_input: ExecutionInput | None,
 ) -> tuple[ExecutionReport, list[str], dict[str, Any]]:
-    normalized_url = normalize_arxiv_url(arxiv_url)
-    arxiv_id = extract_arxiv_id(normalized_url)
+    original_arxiv_input = arxiv_url
+    arxiv_id, normalized_url = normalize_arxiv_input(arxiv_url)
 
     arxiv_client = ArxivClient()
     github_client = GitHubClient()
@@ -66,7 +65,10 @@ def _audit_with_debug(
     except ValueError:
         raise
     except Exception as exc:
-        raise ValueError(f"Could not resolve arXiv metadata for {arxiv_id}") from exc
+        details = [f"original_input={original_arxiv_input!r}", f"normalized_arxiv_id={arxiv_id!r}"]
+        if normalized_url:
+            details.append(f"failing_url={normalized_url!r}")
+        raise ValueError(f"Could not resolve arXiv metadata ({'; '.join(details)})") from exc
 
     discovered: list[RepoCandidate] = []
     candidates: list[RepoCandidate]
