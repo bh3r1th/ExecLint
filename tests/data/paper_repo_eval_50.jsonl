@@ -1,0 +1,50 @@
+{"name": "YOLOv8", "arxiv_url": "https://arxiv.org/abs/2305.09972", "repo_url": "https://github.com/ultralytics/ultralytics", "expected_bucket": "clean"}
+{"name": "LoRA", "arxiv_url": "https://arxiv.org/abs/2106.09685", "repo_url": "https://github.com/microsoft/LoRA", "expected_bucket": "clean"}
+{"name": "Segment Anything (SAM)", "arxiv_url": "https://arxiv.org/abs/2304.02643", "repo_url": "https://github.com/facebookresearch/segment-anything", "expected_bucket": "clean"}
+{"name": "ControlNet", "arxiv_url": "https://arxiv.org/abs/2302.05543", "repo_url": "https://github.com/lllyasviel/ControlNet", "expected_bucket": "clean"}
+{"name": "Transformers (BERT)", "arxiv_url": "https://arxiv.org/abs/1810.04805", "repo_url": "https://github.com/huggingface/transformers", "expected_bucket": "clean"}
+{"name": "DeepSeek-V3", "arxiv_url": "https://arxiv.org/abs/2412.19437", "repo_url": "https://github.com/deepseek-ai/DeepSeek-V3", "expected_bucket": "clean"}
+{"name": "CycleGAN", "arxiv_url": "https://arxiv.org/abs/1703.10593", "repo_url": "https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix", "expected_bucket": "clean"}
+{"name": "StyleGAN3", "arxiv_url": "https://arxiv.org/abs/2106.12423", "repo_url": "https://github.com/NVlabs/stylegan3", "expected_bucket": "clean"}
+{"name": "AnimateDiff", "arxiv_url": "https://arxiv.org/abs/2307.04725", "repo_url": "https://github.com/guoyww/AnimateDiff", "expected_bucket": "clean"}
+{"name": "FlashAttention", "arxiv_url": "https://arxiv.org/abs/2205.14135", "repo_url": "https://github.com/Dao-AILab/flash-attention", "expected_bucket": "clean"}
+{"name": "FastSAM", "arxiv_url": "https://arxiv.org/abs/2306.14617", "repo_url": "https://github.com/CASIA-IVA-Lab/FastSAM", "expected_bucket": "clean"}
+{"name": "Whisper", "arxiv_url": "https://arxiv.org/abs/2212.04356", "repo_url": "https://github.com/openai/whisper", "expected_bucket": "clean"}
+{"name": "Detectron2", "arxiv_url": "https://arxiv.org/abs/1910.03023", "repo_url": "https://github.com/facebookresearch/detectron2", "expected_bucket": "clean"}
+{"name": "Stable Diffusion", "arxiv_url": "https://arxiv.org/abs/2112.10752", "repo_url": "https://github.com/CompVis/stable-diffusion", "expected_bucket": "clean"}
+{"name": "Mistral-7B", "arxiv_url": "https://arxiv.org/abs/2310.06825", "repo_url": "https://github.com/mistralai/mistral-src", "expected_bucket": "clean"}
+{"name": "AutoGPT", "arxiv_url": "https://arxiv.org/abs/2304.03442", "repo_url": "https://github.com/Significant-Gravitas/AutoGPT", "expected_bucket": "messy"}
+{"name": "Grok-1", "arxiv_url": "https://x.ai/blog/grok-1", "repo_url": "https://github.com/xai-org/grok-1", "expected_bucket": "messy"}
+{"name": "DINOv2", "arxiv_url": "https://arxiv.org/abs/2304.07193", "repo_url": "https://github.com/facebookresearch/dinov2", "expected_bucket": "messy"}
+{"name": "VILA", "arxiv_url": "https://arxiv.org/abs/2312.07533", "repo_url": "https://github.com/NVlabs/VILA", "expected_bucket": "messy"}
+{"name": "DragGAN", "arxiv_url": "https://arxiv.org/abs/2305.10973", "repo_url": "https://github.com/XingangPan/DragGAN", "expected_bucket": "messy"}
+{"name": "GPT-NeoX-20B", "arxiv_url": "https://arxiv.org/abs/2204.06745", "repo_url": "https://github.com/EleutherAI/gpt-neox", "expected_bucket": "messy"}
+{"name": "DeepSpeed", "arxiv_url": "https://arxiv.org/abs/2005.11181", "repo_url": "https://github.com/microsoft/DeepSpeed", "expected_bucket": "messy"}
+{"name": "Open-R1", "arxiv_url": "https://arxiv.org/abs/2501.12948", "repo_url": "https://github.com/huggingface/open-r1", "expected_bucket": "messy"}
+{"name": "Stable Video Diffusion", "arxiv_url": "https://arxiv.org/abs/2311.15127", "repo_url": "https://github.com/Stability-AI/generative-models", "expected_bucket": "messy"}
+{"name": "Open-Unmix", "arxiv_url": "https://arxiv.org/abs/1909.01174", "repo_url": "https://github.com/sigsep/open-unmix-pytorch", "expected_bucket": "messy"}
+{"name": "VideoCrafter", "arxiv_url": "https://arxiv.org/abs/2310.19512", "repo_url": "https://github.com/AILab-CVC/VideoCrafter", "expected_bucket": "messy"}
+{"name": "LLaVA", "arxiv_url": "https://arxiv.org/abs/2304.08485", "repo_url": "https://github.com/haotian-liu/LLaVA", "expected_bucket": "messy"}
+{"name": "Meta-Transformer", "arxiv_url": "https://arxiv.org/abs/2307.10802", "repo_url": "https://github.com/invictus717/MetaTransformer", "expected_bucket": "messy"}
+{"name": "InstructPix2Pix", "arxiv_url": "https://arxiv.org/abs/2211.09800", "repo_url": "https://github.com/timothybrooks/instruct-pix2pix", "expected_bucket": "messy"}
+{"name": "GLM-130B", "arxiv_url": "https://arxiv.org/abs/2210.02414", "repo_url": "https://github.com/THUDM/GLM-130B", "expected_bucket": "messy"}
+{"name": "Mamba-SSM", "arxiv_url": "https://arxiv.org/abs/2312.00752", "repo_url": "https://github.com/state-spaces/mamba", "expected_bucket": "messy"}
+{"name": "Point-E", "arxiv_url": "https://arxiv.org/abs/2212.08751", "repo_url": "https://github.com/openai/point-e", "expected_bucket": "messy"}
+{"name": "VideoLDM", "arxiv_url": "https://arxiv.org/abs/2304.08818", "repo_url": "https://github.com/NVlabs/VideoLDM", "expected_bucket": "messy"}
+{"name": "DeepFloyd IF", "arxiv_url": "https://arxiv.org/abs/2305.10973", "repo_url": "https://github.com/deep-floyd/IF", "expected_bucket": "messy"}
+{"name": "InternLM", "arxiv_url": "https://arxiv.org/abs/2308.13109", "repo_url": "https://github.com/InternLM/InternLM", "expected_bucket": "messy"}
+{"name": "AlphaFold2", "arxiv_url": "https://arxiv.org/abs/2107.03377", "repo_url": "https://github.com/google-deepmind/alphafold", "expected_bucket": "broken"}
+{"name": "DALL-E 1 (Unofficial)", "arxiv_url": "https://arxiv.org/abs/2102.12092", "repo_url": "https://github.com/lucidrains/DALLE-pytorch", "expected_bucket": "broken"}
+{"name": "SegNet", "arxiv_url": "https://arxiv.org/abs/1511.00561", "repo_url": "https://github.com/alexgkendall/SegNet-Tutorial", "expected_bucket": "broken"}
+{"name": "BigGAN (PyTorch)", "arxiv_url": "https://arxiv.org/abs/1809.11096", "repo_url": "https://github.com/ajayjain/BigGAN-PyTorch", "expected_bucket": "broken"}
+{"name": "SparseTransformer", "arxiv_url": "https://arxiv.org/abs/1904.10509", "repo_url": "https://github.com/openai/sparse_attention", "expected_bucket": "broken"}
+{"name": "Mask R-CNN (Keras)", "arxiv_url": "https://arxiv.org/abs/1703.06870", "repo_url": "https://github.com/matterport/Mask_RCNN", "expected_bucket": "broken"}
+{"name": "Neural Style Transfer", "arxiv_url": "https://arxiv.org/abs/1508.06576", "repo_url": "https://github.com/jcjohnson/neural-style", "expected_bucket": "broken"}
+{"name": "Transformer-XL (Official)", "arxiv_url": "https://arxiv.org/abs/1901.02860", "repo_url": "https://github.com/kimiyoung/transformer-xl", "expected_bucket": "broken"}
+{"name": "PixelCNN", "arxiv_url": "https://arxiv.org/abs/1606.05328", "repo_url": "https://github.com/openai/pixel-cnn", "expected_bucket": "broken"}
+{"name": "GAN Dissection", "arxiv_url": "https://arxiv.org/abs/1811.10597", "repo_url": "https://github.com/CSAILVision/GANDissect", "expected_bucket": "broken"}
+{"name": "StyleALive", "arxiv_url": "https://arxiv.org/abs/2104.13521", "repo_url": "https://github.com/m-p-muller/StyleALive", "expected_bucket": "broken"}
+{"name": "Glow", "arxiv_url": "https://arxiv.org/abs/1807.03039", "repo_url": "https://github.com/openai/glow", "expected_bucket": "broken"}
+{"name": "Tacotron 2 (Unofficial)", "arxiv_url": "https://arxiv.org/abs/1712.05884", "repo_url": "https://github.com/Rayhane-mamah/Tacotron-2", "expected_bucket": "broken"}
+{"name": "FastFlow", "arxiv_url": "https://arxiv.org/abs/2111.07677", "repo_url": "https://github.com/gml720/FastFlow", "expected_bucket": "broken"}
+{"name": "VQ-VAE-2", "arxiv_url": "https://arxiv.org/abs/1906.00446", "repo_url": "https://github.com/rosinality/vq-vae-2-pytorch", "expected_bucket": "broken"}
