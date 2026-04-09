@@ -172,6 +172,7 @@ def test_no_fix_weak_repo_missing_weights_is_no_go() -> None:
 
     assert report.verdict == "NO-GO"
     assert report.tthw == "Level 4"
+    assert report.what_breaks == "Missing weights and cannot run inference; no obvious runnable entrypoint for any meaningful capability"
 
 
 def test_moderate_repo_medium_blocker_with_fix_is_caution() -> None:
@@ -202,6 +203,7 @@ def test_moderate_repo_medium_blocker_with_fix_is_caution() -> None:
 
     assert report.verdict == "CAUTION"
     assert report.tthw in {"Level 2", "Level 3"}
+    assert report.what_breaks == "API drift after dependency update"
 
 
 def test_strong_repo_missing_weights_with_credible_path_not_no_go() -> None:
@@ -213,6 +215,7 @@ def test_strong_repo_missing_weights_with_credible_path_not_no_go() -> None:
         has_readme=True,
         setup_signals=["requirements.txt", "pyproject.toml"],
         entrypoint_signals=["infer.py"],
+        inferred_capabilities=["inference"],
     )
 
     report = build_execution_report(
@@ -223,6 +226,8 @@ def test_strong_repo_missing_weights_with_credible_path_not_no_go() -> None:
 
     assert report.verdict == "CAUTION"
     assert report.tthw == "Level 2"
+    assert report.runnable_for == "inference"
+    assert report.fix == "No clear fix found"
 
 
 def test_weak_repo_with_fix_and_gated_weights_is_caution() -> None:
@@ -315,3 +320,328 @@ def test_hf_unknown_wording_is_unclear_not_missing() -> None:
     )
 
     assert report.hf_status == "Hugging Face status unclear"
+    assert "checkpoint provenance unclear" not in report.technical_debt
+
+
+def test_weak_high_discovery_repo_still_does_not_force_go() -> None:
+    weak_repo = RepoCandidate(
+        name="paper-code",
+        full_name="authors/paper-code",
+        url="https://github.com/authors/paper-code",
+        readiness_label="weak",
+        discovery_score=1000,
+        has_readme=False,
+        setup_signals=[],
+        entrypoint_signals=[],
+    )
+
+    report = build_execution_report(
+        candidates=[weak_repo],
+        issue_signals_by_repo={"authors/paper-code": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.verdict != "GO"
+    assert report.tthw == "Level 4"
+
+
+def test_provided_weights_reduces_no_go_risk() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["infer.py"],
+        inferred_capabilities=["inference"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={
+            "org/demo": [
+                IssueFixSignal(
+                    blocker="Missing weights for inference",
+                    fix="",
+                    confidence="high",
+                    blocker_category="weights",
+                )
+            ]
+        },
+        hf_status=HFModelStatus(status="found", model_id="https://weights.example/model.bin", notes="User-provided weights URL"),
+        weights_url="https://weights.example/model.bin",
+    )
+
+    assert report.verdict == "CAUTION"
+    assert report.hf_status == "User-provided weights"
+    assert "weights/checkpoints not yet pinned down" not in report.technical_debt
+
+
+def test_smoke_test_only_repo_reflects_limited_reality() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["smoke_test.py"],
+        inferred_capabilities=["smoke_test"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="found", model_id="org/model"),
+    )
+
+    assert report.verdict == "CAUTION"
+    assert "repo appears limited to smoke tests" in report.technical_debt
+    assert report.not_clearly_supported == "demo, inference, training, evaluation"
+
+
+def test_missing_ref_adds_technical_debt_but_not_immediate_failure() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="strong",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["infer.py"],
+        inferred_capabilities=["inference"],
+        pushed_at="2026-03-01T00:00:00Z",
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="found", model_id="org/model"),
+        ref=None,
+    )
+
+    assert report.verdict != "NO-GO"
+    assert "stale branch ambiguity" not in report.technical_debt
+
+
+def test_research_workflow_repo_is_not_auto_no_go() -> None:
+    repo = RepoCandidate(
+        name="research",
+        full_name="org/research",
+        url="https://github.com/org/research",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["train.py", "scripts/"],
+        inferred_capabilities=["training", "evaluation"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/research": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.verdict == "CAUTION"
+    assert report.runnable_for == "training, evaluation"
+    assert "no obvious runnable entrypoint for any meaningful capability" not in report.what_breaks
+    assert report.not_clearly_supported == "demo, inference"
+
+
+def test_no_direct_inference_or_demo_does_not_force_no_go() -> None:
+    repo = RepoCandidate(
+        name="eval",
+        full_name="org/eval",
+        url="https://github.com/org/eval",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["scripts/"],
+        inferred_capabilities=["evaluation"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/eval": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.verdict != "NO-GO"
+    assert report.runnable_for == "evaluation"
+
+
+def test_missing_weights_only_appears_when_relevant() -> None:
+    repo = RepoCandidate(
+        name="train-only",
+        full_name="org/train-only",
+        url="https://github.com/org/train-only",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["train.py"],
+        inferred_capabilities=["training"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/train-only": []},
+        hf_status=HFModelStatus(status="not_found"),
+    )
+
+    assert "weights/checkpoints not yet pinned down" not in report.technical_debt
+    assert report.what_breaks != "Weights/checkpoints not visible"
+
+
+def test_technical_debt_is_conditional_not_templated() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="strong",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["demo.py"],
+        inferred_capabilities=["demo"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="found", model_id="org/model"),
+        ref="v1.0.0",
+    )
+
+    assert report.technical_debt == "None identified"
+
+
+def test_smoke_train_eval_path_is_caution_not_no_go() -> None:
+    repo = RepoCandidate(
+        name="workflow",
+        full_name="org/workflow",
+        url="https://github.com/org/workflow",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["train.py", "eval.py", "smoke_test.py"],
+        inferred_capabilities=["training", "evaluation", "smoke_test"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/workflow": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.verdict == "CAUTION"
+    assert "no obvious runnable entrypoint for any meaningful capability" not in report.what_breaks
+
+
+def test_runnable_for_present_never_claims_no_meaningful_entrypoint() -> None:
+    repo = RepoCandidate(
+        name="research",
+        full_name="org/research",
+        url="https://github.com/org/research",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["train.py", "eval.py"],
+        inferred_capabilities=["training", "evaluation"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/research": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.runnable_for == "training, evaluation"
+    assert "no runnable entrypoint for any meaningful capability" not in report.what_breaks
+    assert "no obvious runnable entrypoint for any meaningful capability" not in report.what_breaks
+
+
+def test_missing_demo_inference_alone_does_not_force_high_severity_wording() -> None:
+    repo = RepoCandidate(
+        name="research",
+        full_name="org/research",
+        url="https://github.com/org/research",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["train.py", "scripts/"],
+        inferred_capabilities=["training", "evaluation"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/research": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.verdict == "CAUTION"
+    assert report.what_breaks != "no obvious runnable entrypoint for any meaningful capability"
+
+
+def test_blockers_trigger_nontrivial_severity_and_precise_debt() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="moderate",
+        has_readme=False,
+        setup_signals=[],
+        entrypoint_signals=["infer.py"],
+        inferred_capabilities=["inference"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="not_found"),
+    )
+
+    assert report.what_breaks == "no clear install path; no clear runnable entrypoint"
+    assert report.technical_debt == "install path ambiguous"
+
+
+def test_missing_weights_shown_only_when_repo_likely_depends_on_them() -> None:
+    repo = RepoCandidate(
+        name="infer",
+        full_name="org/infer",
+        url="https://github.com/org/infer",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["infer.py", "checkpoint_loader.py"],
+        inferred_capabilities=["inference"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/infer": []},
+        hf_status=HFModelStatus(status="not_found"),
+    )
+
+    assert report.what_breaks == "external checkpoints/weights not linked"
+    assert "checkpoint provenance unclear" in report.technical_debt
+
+
+def test_generic_fix_filler_is_not_emitted() -> None:
+    repo = RepoCandidate(
+        name="train",
+        full_name="org/train",
+        url="https://github.com/org/train",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["train.py"],
+        inferred_capabilities=["training"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/train": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.fix == "No clear fix found"

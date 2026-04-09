@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from execlint.clients.github_client import GitHubClient
 from execlint.config import MAX_GITHUB_SEARCH_RESULTS_INSPECTED, MAX_REPO_CANDIDATES
@@ -34,20 +35,24 @@ WEAK_TEMPLATE_TERMS = ("template", "boilerplate", "demo only", "starter")
 def discover_repositories(paper: ArxivPaper, github: GitHubClient) -> list[RepoCandidate]:
     queries = _build_queries(paper)
 
-    seen: set[str] = set()
-    scored: list[RepoCandidate] = []
+    scored_by_repo: dict[str, RepoCandidate] = {}
+
+    direct_candidate = _candidate_from_paper_code_url(paper)
+    if direct_candidate is not None:
+        scored_by_repo[direct_candidate.full_name] = direct_candidate
+
     for query in queries:
         for repo in github.search_repositories(
             query=query,
             limit=MAX_REPO_CANDIDATES,
             max_results_inspected=MAX_GITHUB_SEARCH_RESULTS_INSPECTED,
         ):
-            if repo.full_name in seen:
-                continue
             score, reasons = _score_repository(repo=repo, paper=paper)
-            scored.append(repo.model_copy(update={"discovery_score": score, "discovery_reasons": reasons}))
-            seen.add(repo.full_name)
+            scored_repo = repo.model_copy(update={"discovery_score": score, "discovery_reasons": reasons})
+            existing = scored_by_repo.get(repo.full_name)
+            scored_by_repo[repo.full_name] = _merge_candidate(existing, scored_repo)
 
+    scored = list(scored_by_repo.values())
     scored.sort(key=lambda repo: (-repo.discovery_score, -repo.stars, repo.full_name.lower()))
     return scored[:MAX_REPO_CANDIDATES]
 
@@ -126,7 +131,67 @@ def _score_repository(repo: RepoCandidate, paper: ArxivPaper) -> tuple[float, li
         score -= 10
         reasons.append("template_only_penalty(-10)")
 
+    if _matches_paper_code_url(repo, paper.code_url):
+        score += 200
+        reasons.append("paper_code_url(+200)")
+
     return round(score, 2), reasons
+
+
+def _candidate_from_paper_code_url(paper: ArxivPaper) -> RepoCandidate | None:
+    if not paper.code_url:
+        return None
+    parsed = urlsplit(paper.code_url.unicode_string())
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if len(segments) < 2:
+        return None
+
+    owner, name = segments[0], segments[1]
+    full_name = f"{owner}/{name}"
+    return RepoCandidate(
+        name=name,
+        full_name=full_name,
+        url=f"https://github.com/{full_name}",
+        owner_login=owner,
+        discovery_score=1000.0,
+        discovery_reasons=["paper_code_url(+1000)"],
+    )
+
+
+def _merge_candidate(existing: RepoCandidate | None, incoming: RepoCandidate) -> RepoCandidate:
+    if existing is None:
+        return incoming
+
+    merged_reasons: list[str] = []
+    for reason in [*existing.discovery_reasons, *incoming.discovery_reasons]:
+        if reason not in merged_reasons:
+            merged_reasons.append(reason)
+
+    return incoming.model_copy(
+        update={
+            "url": existing.url if existing.discovery_score > incoming.discovery_score else incoming.url,
+            "stars": max(existing.stars, incoming.stars),
+            "open_issues_count": max(existing.open_issues_count, incoming.open_issues_count),
+            "description": incoming.description or existing.description,
+            "owner_login": incoming.owner_login or existing.owner_login,
+            "archived": existing.archived or incoming.archived,
+            "pushed_at": incoming.pushed_at or existing.pushed_at,
+            "size_kb": max(existing.size_kb, incoming.size_kb),
+            "default_branch": incoming.default_branch or existing.default_branch,
+            "discovery_score": max(existing.discovery_score, incoming.discovery_score),
+            "discovery_reasons": merged_reasons,
+        }
+    )
+
+
+def _matches_paper_code_url(repo: RepoCandidate, code_url: object) -> bool:
+    if code_url is None:
+        return False
+    parsed = urlsplit(str(code_url))
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if len(segments) < 2:
+        return False
+    return repo.full_name.lower() == f"{segments[0]}/{segments[1]}".lower()
 
 
 def _official_wording_points(repo: RepoCandidate, paper: ArxivPaper) -> float:

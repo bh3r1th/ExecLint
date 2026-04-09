@@ -3,24 +3,37 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from execlint.clients.github_client import GitHubClient
-from execlint.models import RepoCandidate
+from execlint.models import RepoCapability, RepoCandidate
 
 SETUP_FILES = ("requirements.txt", "pyproject.toml", "environment.yml", "setup.py")
-ENTRYPOINT_FILES = ("train.py", "infer.py", "inference.py", "demo.py", "app.py")
+ENTRYPOINT_FILES = ("train.py", "infer.py", "inference.py", "demo.py", "app.py", "smoke_test.py")
+DEMO_TOKENS = ("demo.py", "app.py", "gradio", "streamlit")
+INFERENCE_PATH_TOKENS = ("infer.py", "inference.py", "predict.py", "generate.py", "generation.py")
+INFERENCE_SERVER_TOKENS = ("serve.py", "server.py", "api.py")
+INFERENCE_README_TOKENS = ("run inference", "inference usage", "predict", "prediction", "text generation", "generate text")
+TRAINING_TOKENS = ("train.py", "trainer", "training", "checkpoint", "finetune")
+EVALUATION_TOKENS = ("eval.py", "evaluate.py", "benchmark", "metrics")
+SMOKE_TEST_TOKENS = ("smoke_test.py", "sanity", "toy", "quickstart")
 
 
-def triage_repositories(candidates: list[RepoCandidate], github: GitHubClient) -> tuple[list[RepoCandidate], RepoCandidate | None]:
+def triage_repositories(
+    candidates: list[RepoCandidate],
+    github: GitHubClient,
+    ref: str | None = None,
+) -> tuple[list[RepoCandidate], RepoCandidate | None]:
     triaged: list[RepoCandidate] = []
     for candidate in candidates:
         readme = github.get_readme(candidate.full_name)
-        paths = github.get_repo_file_paths(candidate.full_name, default_branch=candidate.default_branch)
+        paths = github.get_repo_file_paths(candidate.full_name, default_branch=ref or candidate.default_branch)
         setup_signals = _extract_setup_signals(readme or "", paths)
         entrypoints = _extract_entrypoints(paths)
+        inferred_capabilities = _infer_capabilities(readme or "", paths)
         activity_score = _activity_score(candidate.pushed_at)
         readiness_score, readiness_label = _compute_readiness(
             has_readme=bool(readme),
             setup_count=len(setup_signals),
             entrypoint_count=len(entrypoints),
+            capability_count=len([capability for capability in inferred_capabilities if capability != RepoCapability.unclear]),
             activity_score=activity_score,
             open_issues_count=candidate.open_issues_count,
             archived=candidate.archived,
@@ -43,10 +56,12 @@ def triage_repositories(candidates: list[RepoCandidate], github: GitHubClient) -
                     "has_readme": bool(readme),
                     "setup_signals": setup_signals,
                     "entrypoint_signals": entrypoints,
+                    "default_branch": ref or candidate.default_branch,
                     "surface_file_count": len(paths),
                     "readiness_score": readiness_score,
                     "readiness_label": readiness_label,
                     "readiness_summary": summary,
+                    "inferred_capabilities": inferred_capabilities,
                 }
             )
         )
@@ -71,6 +86,39 @@ def _extract_entrypoints(paths: list[str]) -> list[str]:
     if any(path.startswith("scripts/") for path in lowered):
         hits.append("scripts/")
     return sorted(set(hits))
+
+
+def _infer_capabilities(readme_text: str, paths: list[str]) -> list[RepoCapability]:
+    lowered_paths = [path.lower() for path in paths]
+    readme_lower = readme_text.lower()
+    capabilities: list[RepoCapability] = []
+
+    if _contains_any(lowered_paths + [readme_lower], DEMO_TOKENS):
+        capabilities.append(RepoCapability.demo)
+    if _has_strong_inference_signal(lowered_paths, readme_lower):
+        capabilities.append(RepoCapability.inference)
+    if _contains_any(lowered_paths + [readme_lower], TRAINING_TOKENS):
+        capabilities.append(RepoCapability.training)
+    if _contains_any(lowered_paths + [readme_lower], EVALUATION_TOKENS):
+        capabilities.append(RepoCapability.evaluation)
+    if _contains_any(lowered_paths + [readme_lower], SMOKE_TEST_TOKENS):
+        capabilities.append(RepoCapability.smoke_test)
+    if not capabilities:
+        capabilities.append(RepoCapability.unclear)
+
+    return capabilities
+
+
+def _contains_any(haystacks: list[str], needles: tuple[str, ...]) -> bool:
+    return any(needle in haystack for haystack in haystacks for needle in needles)
+
+
+def _has_strong_inference_signal(paths: list[str], readme_text: str) -> bool:
+    if _contains_any(paths, INFERENCE_PATH_TOKENS):
+        return True
+    if _contains_any(paths, INFERENCE_SERVER_TOKENS) and _contains_any([readme_text], INFERENCE_README_TOKENS):
+        return True
+    return _contains_any([readme_text], ("run inference", "inference usage", "predict with", "usage: inference"))
 
 
 def _activity_score(pushed_at: str | None) -> float:
@@ -110,6 +158,7 @@ def _compute_readiness(
     has_readme: bool,
     setup_count: int,
     entrypoint_count: int,
+    capability_count: int,
     activity_score: float,
     open_issues_count: int,
     archived: bool,
@@ -137,6 +186,12 @@ def _compute_readiness(
         score -= 1.5
     elif open_issues_count > 50:
         score -= 0.7
+    if entrypoint_count == 0 and capability_count == 0:
+        score = min(score, 2.9)
+    elif entrypoint_count == 0:
+        score = min(score, 3.4)
+    elif capability_count > 0 and (has_readme or setup_count > 0):
+        score = max(score, 3.5)
 
     if score >= 6.5:
         label = "strong"

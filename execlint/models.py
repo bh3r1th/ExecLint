@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
+
+
+class RepoCapability(str, Enum):
+    demo = "demo"
+    inference = "inference"
+    training = "training"
+    evaluation = "evaluation"
+    smoke_test = "smoke_test"
+    unclear = "unclear"
 
 
 class ArxivPaper(BaseModel):
@@ -11,6 +21,8 @@ class ArxivPaper(BaseModel):
     title: str | None = None
     abstract: str | None = None
     authors: list[str] = Field(default_factory=list)
+    code_url: HttpUrl | None = None
+    code_url_source: Literal["arxiv_page", "none"] = "none"
 
 
 class RepoCandidate(BaseModel):
@@ -34,6 +46,7 @@ class RepoCandidate(BaseModel):
     readiness_score: float = 0.0
     readiness_label: Literal["strong", "moderate", "weak"] = "weak"
     readiness_summary: str = ""
+    inferred_capabilities: list[RepoCapability] = Field(default_factory=list)
 
 
 class IssueFixSignal(BaseModel):
@@ -56,7 +69,16 @@ class ExecutionReport(BaseModel):
     verdict: Literal["GO", "CAUTION", "NO-GO"]
     tthw: Literal["Level 1", "Level 2", "Level 3", "Level 4"]
     best_repo: str
+    runnable_for: str = "unclear"
+    not_clearly_supported: str = ""
     what_breaks: str
     fix: str
     hf_status: str
     technical_debt: str
+
+
+class ExecutionInput(BaseModel):
+    arxiv_url: HttpUrl
+    repo_url: HttpUrl
+    weights_url: HttpUrl | None = None
+    ref: str | None = None

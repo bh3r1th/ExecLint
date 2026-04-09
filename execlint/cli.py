@@ -1,21 +1,36 @@
 from __future__ import annotations
 
+import argparse
+
+from execlint.models import ExecutionInput
+from execlint.orchestrator import audit_execution_input_with_debug
 import typer
 
-from execlint.orchestrator import audit_arxiv_url, audit_arxiv_url_with_debug
+TTHW_MEANINGS = {
+    "Level 1": "runnable immediately",
+    "Level 2": "minor setup required",
+    "Level 3": "substantial setup required",
+    "Level 4": "no credible runnable path",
+}
 
-app = typer.Typer(help="ExecLint CLI")
 
-
-@app.command("audit")
-def audit(arxiv_url: str, debug: bool = typer.Option(False, "--debug", help="Print compact debug signals")) -> None:
-    """Audit execution readiness for a single arXiv URL."""
+def audit(
+    arxiv_url: str,
+    repo_url: str,
+    weights_url: str | None = None,
+    ref: str | None = None,
+    debug: bool = False,
+) -> None:
     try:
-        if debug:
-            report, warnings, debug_signals = audit_arxiv_url_with_debug(arxiv_url)
-        else:
-            report, warnings = audit_arxiv_url(arxiv_url)
-            debug_signals = {}
+        if not repo_url:
+            raise ValueError("repo_url is required")
+        execution_input = ExecutionInput(
+            arxiv_url=arxiv_url,
+            repo_url=repo_url,
+            weights_url=weights_url,
+            ref=ref,
+        )
+        report, warnings, debug_signals = audit_execution_input_with_debug(execution_input)
     except ValueError as exc:
         typer.secho(f"Invalid input: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from None
@@ -27,10 +42,14 @@ def audit(arxiv_url: str, debug: bool = typer.Option(False, "--debug", help="Pri
         warning_text = "; ".join(dict.fromkeys(warnings))
         typer.secho(f"Warning: {warning_text}", fg=typer.colors.YELLOW, err=True)
 
+    typer.echo("paper:")
+    typer.echo(f"- Title: {debug_signals.get('paper_title') or 'None found'}")
+    typer.echo(f"- Code URL: {execution_input.repo_url}")
     typer.echo("execution_report:")
     typer.echo(f"- Verdict: {report.verdict}")
-    typer.echo(f"- TTHW: {report.tthw}")
-    typer.echo(f"- Best Repo: {report.best_repo}")
+    typer.echo(f"- Time-to-Hello-World (TTHW): {report.tthw} — {TTHW_MEANINGS[report.tthw]}")
+    typer.echo(f"- Runnable For: {report.runnable_for}")
+    typer.echo(f"- Not Clearly Supported: {report.not_clearly_supported or 'None identified'}")
     typer.echo(f"- What Breaks: {report.what_breaks}")
     typer.echo(f"- Fix (if any): {report.fix}")
     typer.echo(f"- HF Status: {report.hf_status}")
@@ -38,14 +57,34 @@ def audit(arxiv_url: str, debug: bool = typer.Option(False, "--debug", help="Pri
 
     if debug:
         typer.echo("debug_signals:")
-        typer.echo(f"- repo candidates inspected: {debug_signals.get('candidate_count', 0)}")
-        typer.echo(f"- repo selected: {debug_signals.get('selected_repo_name', 'none')}")
+        capabilities = debug_signals.get("inferred_capabilities", [])
+        typer.echo(f"- inferred capabilities: {', '.join(capabilities) if capabilities else 'none'}")
         typer.echo(f"- readiness: {debug_signals.get('selected_repo_readiness', 'n/a')}")
         typer.echo(f"- blocker severity: {debug_signals.get('selected_repo_blocker_severity', 'n/a')}")
-        typer.echo(f"- fix signals found: {debug_signals.get('selected_repo_fix_signal_count', 0)}")
-        typer.echo(f"- HF: {debug_signals.get('hf_summary', 'unclear')}")
+        typer.echo(f"- weights source: {debug_signals.get('weights_source') or 'none'}")
         failures = debug_signals.get("partial_source_failures", [])
         typer.echo(f"- partial failures: {', '.join(failures) if failures else 'none'}")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="execlint", description="ExecLint CLI")
+    parser.add_argument("arxiv_url")
+    parser.add_argument("--repo", dest="repo_url", required=True)
+    parser.add_argument("--weights", dest="weights_url")
+    parser.add_argument("--ref")
+    parser.add_argument("--debug", action="store_true")
+    return parser
+
+
+def app(argv: list[str] | None = None) -> None:
+    args = _build_parser().parse_args(argv)
+    audit(
+        arxiv_url=args.arxiv_url,
+        repo_url=args.repo_url,
+        weights_url=args.weights_url,
+        ref=args.ref,
+        debug=bool(args.debug),
+    )
 
 
 if __name__ == "__main__":

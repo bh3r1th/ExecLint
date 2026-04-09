@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from execlint.models import ArxivPaper, HFModelStatus, RepoCandidate
-from execlint.orchestrator import audit_arxiv_url, audit_arxiv_url_with_debug
+from execlint.models import ArxivPaper, ExecutionInput, HFModelStatus, RepoCandidate
+from execlint.orchestrator import audit_arxiv_url, audit_arxiv_url_with_debug, audit_execution_input_with_debug
 
 
 def test_orchestrator_continues_when_github_discovery_fails(monkeypatch) -> None:
@@ -58,12 +58,12 @@ def test_orchestrator_returns_unknown_hf_on_hf_failure(monkeypatch) -> None:
     monkeypatch.setattr("execlint.orchestrator.discover_repositories", lambda paper, github: [candidate])
     monkeypatch.setattr(
         "execlint.orchestrator.triage_repositories",
-        lambda candidates, github: ([candidate], candidate),
+        lambda candidates, github, ref=None: ([candidate], candidate),
     )
     monkeypatch.setattr("execlint.orchestrator.mine_issue_signals", lambda repo, github: [])
     monkeypatch.setattr(
         "execlint.orchestrator.check_hf_status",
-        lambda paper, hf_client: (_ for _ in ()).throw(RuntimeError("hf down")),
+        lambda paper, hf_client, weights_url=None: (_ for _ in ()).throw(RuntimeError("hf down")),
     )
 
     report, warnings = audit_arxiv_url("https://arxiv.org/abs/2401.00001")
@@ -87,14 +87,14 @@ def test_orchestrator_issue_mining_failure_marks_fix_unavailable(monkeypatch) ->
 
     monkeypatch.setattr("execlint.orchestrator.ArxivClient.fetch_paper", lambda self, arxiv_id, url: paper)
     monkeypatch.setattr("execlint.orchestrator.discover_repositories", lambda paper, github: [candidate])
-    monkeypatch.setattr("execlint.orchestrator.triage_repositories", lambda candidates, github: ([candidate], candidate))
+    monkeypatch.setattr("execlint.orchestrator.triage_repositories", lambda candidates, github, ref=None: ([candidate], candidate))
     monkeypatch.setattr(
         "execlint.orchestrator.mine_issue_signals",
         lambda repo, github: (_ for _ in ()).throw(RuntimeError("issues down")),
     )
     monkeypatch.setattr(
         "execlint.orchestrator.check_hf_status",
-        lambda paper, hf_client: HFModelStatus(status="found", model_id="org/model", gated=False),
+        lambda paper, hf_client, weights_url=None: HFModelStatus(status="found", model_id="org/model", gated=False),
     )
 
     report, warnings = audit_arxiv_url("https://arxiv.org/abs/2401.00001")
@@ -116,11 +116,44 @@ def test_debug_payload_remains_compact_on_partial_results(monkeypatch) -> None:
     _, _, debug = audit_arxiv_url_with_debug("https://arxiv.org/abs/1234.5678")
 
     assert debug["candidate_count"] == 0
+    assert debug["paper_title"] == "Demo Paper"
+    assert debug["paper_code_url"] is None
+    assert debug["paper_code_url_source"] == "none"
     assert debug["selected_repo_name"] == "none"
     assert debug["selected_repo_readiness"] == "n/a"
-    assert debug["selected_repo_blocker_severity"] == "n/a"
+    assert debug["selected_repo_blocker_severity"] == "low"
     assert debug["selected_repo_fix_signal_count"] == 0
     assert debug["hf_summary"] in {"unclear", "missing", "found", "gated"}
+
+
+def test_debug_payload_sets_blocker_severity_when_report_has_blockers(monkeypatch) -> None:
+    paper = ArxivPaper(arxiv_id="2401.00001", url="https://arxiv.org/abs/2401.00001", title="Demo Paper")
+    candidate = RepoCandidate(
+        name="research",
+        full_name="org/research",
+        url="https://github.com/org/research",
+        has_readme=False,
+        setup_signals=[],
+        entrypoint_signals=["train.py"],
+        readiness_label="moderate",
+        inferred_capabilities=["training"],
+    )
+
+    monkeypatch.setattr("execlint.orchestrator.ArxivClient.fetch_paper", lambda self, arxiv_id, url: paper)
+    monkeypatch.setattr("execlint.orchestrator.discover_repositories", lambda paper, github: [candidate])
+    monkeypatch.setattr(
+        "execlint.orchestrator.triage_repositories",
+        lambda candidates, github, ref=None: ([candidate], candidate),
+    )
+    monkeypatch.setattr("execlint.orchestrator.mine_issue_signals", lambda repo, github: [])
+    monkeypatch.setattr(
+        "execlint.orchestrator.check_hf_status",
+        lambda paper, hf_client, weights_url=None: HFModelStatus(status="unknown"),
+    )
+
+    _, _, debug = audit_arxiv_url_with_debug("https://arxiv.org/abs/2401.00001")
+
+    assert debug["selected_repo_blocker_severity"] == "medium"
 
 
 def test_orchestrator_arxiv_parse_failure_is_value_error(monkeypatch) -> None:
@@ -135,3 +168,81 @@ def test_orchestrator_arxiv_parse_failure_is_value_error(monkeypatch) -> None:
         assert "bad arxiv" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("Expected ValueError for invalid arXiv parse")
+
+
+def test_orchestrator_bypasses_repo_discovery_when_repo_url_provided(monkeypatch) -> None:
+    paper = ArxivPaper(arxiv_id="2401.00001", url="https://arxiv.org/abs/2401.00001", title="Demo Paper")
+    candidate = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pip_install"],
+        entrypoint_signals=["train.py"],
+        readiness_label="strong",
+        inferred_capabilities=["training"],
+    )
+
+    monkeypatch.setattr("execlint.orchestrator.ArxivClient.fetch_paper", lambda self, arxiv_id, url: paper)
+    monkeypatch.setattr(
+        "execlint.orchestrator.discover_repositories",
+        lambda paper, github: (_ for _ in ()).throw(AssertionError("repo discovery should be bypassed")),
+    )
+    monkeypatch.setattr(
+        "execlint.orchestrator.triage_repositories",
+        lambda candidates, github, ref=None: ([candidate], candidate),
+    )
+    monkeypatch.setattr("execlint.orchestrator.mine_issue_signals", lambda repo, github: [])
+    monkeypatch.setattr(
+        "execlint.orchestrator.check_hf_status",
+        lambda paper, hf_client, weights_url=None: HFModelStatus(status="unknown"),
+    )
+
+    report, _, debug = audit_execution_input_with_debug(
+        ExecutionInput(
+            arxiv_url="https://arxiv.org/abs/2401.00001",
+            repo_url="https://github.com/org/demo",
+            ref="main",
+        )
+    )
+
+    assert report.best_repo == "https://github.com/org/demo"
+    assert debug["candidate_count"] == 1
+    assert debug["selected_repo_name"] == "org/demo"
+    assert debug["ref"] == "main"
+    assert debug["weights_source"] == "none"
+    assert debug["inferred_capabilities"] == ["training"]
+
+
+def test_orchestrator_uses_provided_weights_and_preserves_repo_url(monkeypatch) -> None:
+    paper = ArxivPaper(arxiv_id="2401.00001", url="https://arxiv.org/abs/2401.00001", title="Demo Paper")
+    candidate = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        has_readme=True,
+        setup_signals=["requirements.txt", "pyproject.toml"],
+        entrypoint_signals=["infer.py"],
+        readiness_label="moderate",
+    )
+
+    monkeypatch.setattr("execlint.orchestrator.ArxivClient.fetch_paper", lambda self, arxiv_id, url: paper)
+    monkeypatch.setattr(
+        "execlint.orchestrator.triage_repositories",
+        lambda candidates, github, ref=None: ([candidate], candidate),
+    )
+    monkeypatch.setattr("execlint.orchestrator.mine_issue_signals", lambda repo, github: [])
+
+    report, _, debug = audit_execution_input_with_debug(
+        ExecutionInput(
+            arxiv_url="https://arxiv.org/abs/2401.00001",
+            repo_url="https://github.com/org/demo",
+            weights_url="https://weights.example/model.bin",
+            ref="release-1",
+        )
+    )
+
+    assert report.best_repo == "https://github.com/org/demo"
+    assert report.hf_status == "User-provided weights"
+    assert debug["weights_source"] == "provided"
+    assert isinstance(debug["inferred_capabilities"], list)

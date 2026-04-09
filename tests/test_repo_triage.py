@@ -32,14 +32,16 @@ def test_triage_marks_readme_setup_entrypoints_and_label() -> None:
     assert "requirements.txt" in good.setup_signals
     assert "train.py" in good.entrypoint_signals
     assert good.readiness_label in {"strong", "moderate"}
+    assert "training" in good.inferred_capabilities
+    assert "smoke_test" in good.inferred_capabilities
     assert best is not None
     assert best.full_name == "org/good"
 
 
 def test_readiness_label_mapping() -> None:
-    strong_score, strong_label = _compute_readiness(True, 3, 2, 1.0, 5, False, 80)
-    moderate_score, moderate_label = _compute_readiness(True, 1, 0, 0.3, 30, False, 250)
-    weak_score, weak_label = _compute_readiness(False, 0, 0, 0.0, 200, True, 2)
+    strong_score, strong_label = _compute_readiness(True, 3, 2, 2, 1.0, 5, False, 80)
+    moderate_score, moderate_label = _compute_readiness(True, 1, 1, 1, 0.3, 30, False, 250)
+    weak_score, weak_label = _compute_readiness(False, 0, 0, 0, 0.0, 200, True, 2)
 
     assert strong_score > moderate_score > weak_score
     assert strong_label == "strong"
@@ -48,16 +50,16 @@ def test_readiness_label_mapping() -> None:
 
 
 def test_archived_penalty_lowers_readiness() -> None:
-    active_score, _ = _compute_readiness(True, 2, 2, 0.6, 10, False, 120)
-    archived_score, archived_label = _compute_readiness(True, 2, 2, 0.6, 10, True, 120)
+    active_score, _ = _compute_readiness(True, 2, 2, 2, 0.6, 10, False, 120)
+    archived_score, archived_label = _compute_readiness(True, 2, 2, 2, 0.6, 10, True, 120)
 
     assert archived_score < active_score
     assert archived_label in {"moderate", "weak"}
 
 
 def test_inactive_fork_penalty_lowers_readiness() -> None:
-    baseline, _ = _compute_readiness(True, 2, 1, 0.3, 10, False, 80, likely_inactive_fork=False)
-    penalized, _ = _compute_readiness(True, 2, 1, 0.3, 10, False, 80, likely_inactive_fork=True)
+    baseline, _ = _compute_readiness(True, 2, 1, 1, 0.3, 10, False, 80, likely_inactive_fork=False)
+    penalized, _ = _compute_readiness(True, 2, 1, 1, 0.3, 10, False, 80, likely_inactive_fork=True)
 
     assert penalized < baseline
 
@@ -71,6 +73,7 @@ def test_runnable_file_boost_reflects_in_entrypoints() -> None:
     repo = triaged[0]
 
     assert {"infer.py", "app.py", "notebook"}.issubset(set(repo.entrypoint_signals))
+    assert {"demo", "inference"}.issubset(set(repo.inferred_capabilities))
     assert repo.readiness_score >= 6.5
     assert best is not None and best.full_name == "org/runnable"
 
@@ -139,3 +142,103 @@ def test_triage_all_weak_is_deterministic() -> None:
 
     assert best is not None
     assert best.full_name == "org/b"
+
+
+def test_triage_uses_explicit_ref_for_repo_paths() -> None:
+    class RefAwareGitHub(DummyGitHub):
+        def __init__(self) -> None:
+            self.requested_refs: list[str] = []
+
+        def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+            self.requested_refs.append(default_branch)
+            return ["requirements.txt", "train.py"]
+
+    github = RefAwareGitHub()
+    candidates = [RepoCandidate(name="good", full_name="org/good", url="https://github.com/org/good")]
+
+    triaged, _ = triage_repositories(candidates, github, ref="release-2026")
+
+    assert github.requested_refs == ["release-2026"]
+    assert triaged[0].default_branch == "release-2026"
+
+
+def test_capability_inference_from_readme_and_paths() -> None:
+    class CapabilityGitHub(DummyGitHub):
+        def get_readme(self, full_name: str) -> str | None:
+            return "Launch with gradio, then run benchmark metrics."
+
+        def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+            return ["app.py", "scripts/predict.py", "eval.py", "metrics/report.py"]
+
+    triaged, _ = triage_repositories(
+        [RepoCandidate(name="capable", full_name="org/capable", url="https://github.com/org/capable")],
+        CapabilityGitHub(),
+    )
+
+    assert set(triaged[0].inferred_capabilities) == {"demo", "inference", "evaluation"}
+
+
+def test_capability_inference_returns_unclear_when_no_signal_exists() -> None:
+    triaged, _ = triage_repositories(
+        [RepoCandidate(name="unclear", full_name="org/unclear", url="https://github.com/org/unclear")],
+        DummyGitHub(),
+    )
+
+    unclear = next(repo for repo in triaged if repo.full_name == "org/unclear")
+    assert unclear.inferred_capabilities == ["unclear"]
+    assert unclear.readiness_label == "weak"
+
+
+def test_weak_inference_evidence_does_not_trigger_inference() -> None:
+    class WeakInferenceGitHub(DummyGitHub):
+        def get_readme(self, full_name: str) -> str | None:
+            return "Supports generation quality analysis."
+
+        def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+            return ["train.py", "metrics/generation_scores.py"]
+
+    triaged, _ = triage_repositories(
+        [RepoCandidate(name="weak-inf", full_name="org/weak-inf", url="https://github.com/org/weak-inf")],
+        WeakInferenceGitHub(),
+    )
+
+    assert "inference" not in triaged[0].inferred_capabilities
+
+
+def test_training_eval_path_is_not_automatically_weak() -> None:
+    class ResearchGitHub(DummyGitHub):
+        def get_readme(self, full_name: str) -> str | None:
+            return "Train the model, then benchmark it."
+
+        def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+            return ["requirements.txt", "train.py", "eval.py", "scripts/run_eval.sh"]
+
+    triaged, _ = triage_repositories(
+        [RepoCandidate(name="research", full_name="org/research", url="https://github.com/org/research")],
+        ResearchGitHub(),
+    )
+
+    assert triaged[0].readiness_label in {"moderate", "strong"}
+
+
+def test_smoke_test_path_is_not_automatically_weak() -> None:
+    class SmokeGitHub(DummyGitHub):
+        def get_readme(self, full_name: str) -> str | None:
+            return "Quickstart sanity check for the released model."
+
+        def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+            return ["requirements.txt", "smoke_test.py"]
+
+    triaged, _ = triage_repositories(
+        [RepoCandidate(name="smoke", full_name="org/smoke", url="https://github.com/org/smoke")],
+        SmokeGitHub(),
+    )
+
+    assert triaged[0].readiness_label in {"moderate", "strong"}
+
+
+def test_no_meaningful_runnable_path_cannot_stay_moderate() -> None:
+    score, label = _compute_readiness(True, 2, 0, 0, 0.6, 10, False, 120)
+
+    assert score < 3.5
+    assert label == "weak"

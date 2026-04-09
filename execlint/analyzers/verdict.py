@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from execlint.models import ExecutionReport, HFModelStatus, IssueFixSignal, RepoCandidate
+from execlint.models import ExecutionReport, HFModelStatus, IssueFixSignal, RepoCapability, RepoCandidate
 
 BLOCKER_SEVERITY_SCORE = {"low": 1, "medium": 2, "high": 3}
 CATEGORY_SEVERITY_HINTS: dict[str, str] = {
@@ -12,12 +12,21 @@ CATEGORY_SEVERITY_HINTS: dict[str, str] = {
     "weights": "high",
     "checkpoint": "high",
 }
+MEANINGFUL_CAPABILITIES = (
+    RepoCapability.demo,
+    RepoCapability.inference,
+    RepoCapability.training,
+    RepoCapability.evaluation,
+    RepoCapability.smoke_test,
+)
 
 
 def build_execution_report(
     candidates: list[RepoCandidate],
     issue_signals_by_repo: dict[str, list[IssueFixSignal]],
     hf_status: HFModelStatus,
+    ref: str | None = None,
+    weights_url: str | None = None,
 ) -> ExecutionReport:
     best_repo = _select_best_repo(candidates, issue_signals_by_repo)
     if best_repo is None:
@@ -25,14 +34,17 @@ def build_execution_report(
             verdict="NO-GO",
             tthw="Level 4",
             best_repo="None found",
+            runnable_for="unclear",
+            not_clearly_supported="",
             what_breaks="No repository candidate",
             fix="Unavailable: no repository data",
             hf_status=_hf_text(hf_status),
-            technical_debt="No credible execution path",
+            technical_debt="None identified",
         )
 
     issue_signals = issue_signals_by_repo.get(best_repo.full_name, [])
-    blocker_severity = _worst_blocker_severity(issue_signals)
+    blockers = _repo_blockers(best_repo, issue_signals, hf_status, weights_url=weights_url)
+    blocker_severity = max((severity for _, severity in blockers), default=0)
     runnable_score = _runnable_signal_score(best_repo)
     has_fix = _has_credible_fix(issue_signals)
 
@@ -43,17 +55,22 @@ def build_execution_report(
         has_fix=has_fix,
         hf_status=hf_status,
         runnable_score=runnable_score,
+        weights_url=weights_url,
     )
+    if tthw == "Level 4" and _has_declared_runnable_capability(best_repo):
+        tthw = "Level 3"
     verdict = _pick_verdict(tthw)
 
     return ExecutionReport(
         verdict=verdict,
         tthw=tthw,
         best_repo=best_repo.url.unicode_string(),
-        what_breaks=_what_breaks(issue_signals, best_repo),
-        fix=_fix_summary(issue_signals),
+        runnable_for=_runnable_for_text(best_repo),
+        not_clearly_supported=_not_clearly_supported_text(best_repo),
+        what_breaks=_what_breaks(blockers),
+        fix=_fix_summary(issue_signals, best_repo),
         hf_status=_hf_text(hf_status),
-        technical_debt=_technical_debt(best_repo, issue_signals, hf_status),
+        technical_debt=_technical_debt(best_repo, issue_signals, hf_status, ref=ref, weights_url=weights_url),
     )
 
 
@@ -96,8 +113,7 @@ def _select_best_repo(
 
     if best.readiness_label == "weak" and strongest_available:
         weak_signals = issue_signals_by_repo.get(best.full_name, [])
-        weak_has_fix = _has_credible_fix(weak_signals)
-        if not weak_has_fix:
+        if not _has_credible_fix(weak_signals):
             return strongest_available[0]
 
         stronger_blocked = all(
@@ -153,6 +169,45 @@ def _runnable_signal_score(repo: RepoCandidate) -> int:
     if repo.has_readme:
         score += 1
     return score
+
+
+def _normalized_capabilities(repo: RepoCandidate) -> list[RepoCapability]:
+    capabilities: list[RepoCapability] = []
+    for capability in repo.inferred_capabilities:
+        if isinstance(capability, RepoCapability):
+            capabilities.append(capability)
+            continue
+        try:
+            capabilities.append(RepoCapability(capability))
+        except ValueError:
+            continue
+    if not capabilities:
+        return [RepoCapability.unclear]
+    return capabilities
+
+
+def _meaningful_capabilities(repo: RepoCandidate) -> list[RepoCapability]:
+    return [capability for capability in _normalized_capabilities(repo) if capability in MEANINGFUL_CAPABILITIES]
+
+
+def _has_declared_runnable_capability(repo: RepoCandidate) -> bool:
+    return bool(_meaningful_capabilities(repo))
+
+
+def _runnable_for_text(repo: RepoCandidate) -> str:
+    capabilities = [capability.value for capability in _normalized_capabilities(repo) if capability != RepoCapability.unclear]
+    return ", ".join(capabilities) if capabilities else "unclear"
+
+
+def _not_clearly_supported_text(repo: RepoCandidate) -> str:
+    capabilities = set(_normalized_capabilities(repo))
+    if capabilities == {RepoCapability.unclear}:
+        return "meaningful execution modes"
+    if capabilities == {RepoCapability.smoke_test}:
+        return "demo, inference, training, evaluation"
+    if capabilities & {RepoCapability.training, RepoCapability.evaluation} and not capabilities & {RepoCapability.demo, RepoCapability.inference}:
+        return "demo, inference"
+    return ""
 
 
 def _signal_blocker_severity(signal: IssueFixSignal) -> int:
@@ -217,8 +272,7 @@ def _has_credible_fix(issue_signals: list[IssueFixSignal]) -> bool:
 
 def _is_clearly_blocked(issue_signals: list[IssueFixSignal]) -> bool:
     severity = _worst_blocker_severity(issue_signals)
-    has_fix = _has_credible_fix(issue_signals)
-    return severity >= 3 or (severity >= 2 and not has_fix)
+    return severity >= 3 or (severity >= 2 and not _has_credible_fix(issue_signals))
 
 
 def _pick_tthw(
@@ -228,52 +282,75 @@ def _pick_tthw(
     has_fix: bool,
     hf_status: HFModelStatus,
     runnable_score: int,
+    weights_url: str | None = None,
 ) -> str:
-    obvious_runnable_path = (
-        repo.has_readme and len(repo.setup_signals) >= 2 and len(repo.entrypoint_signals) >= 1 and runnable_score >= 4
-    )
-    plausible_runnable_path = _has_plausible_runnable_path(repo, runnable_score)
-    weights_available = hf_status.status == "found"
-    weights_unclear = hf_status.status in {"unknown", "not_found"}
-    blocker_high_no_fix = blocker_severity >= 3 and not has_fix
-    infra_friction = _has_infra_friction(issue_signals)
+    meaningful_capabilities = _meaningful_capabilities(repo)
+    runtime_capabilities = set(meaningful_capabilities) & {RepoCapability.demo, RepoCapability.inference}
+    smoke_test_only = set(_normalized_capabilities(repo)) == {RepoCapability.smoke_test}
+    credible_path = _has_credible_runnable_path(repo, hf_status, issue_signals, weights_url=weights_url)
+    weights_gap = _repo_requires_external_weights(repo, issue_signals) and hf_status.status != "found" and not weights_url
 
-    if blocker_high_no_fix:
+    if not credible_path:
         return "Level 4"
-    if not plausible_runnable_path and weights_unclear and not has_fix:
-        return "Level 4"
-    if repo.readiness_label == "weak" and blocker_severity >= 2 and not has_fix:
-        return "Level 4"
-
-    if obvious_runnable_path and weights_available and blocker_severity <= 1 and repo.readiness_label in {"strong", "moderate"}:
+    if smoke_test_only:
+        return "Level 3"
+    if (
+        runtime_capabilities
+        and repo.readiness_label in {"strong", "moderate"}
+        and runnable_score >= 4
+        and blocker_severity <= 1
+        and not weights_gap
+        and hf_status.status == "found"
+    ):
         return "Level 1"
-    if repo.readiness_label in {"strong", "moderate"} and plausible_runnable_path and blocker_severity <= 2:
-        if weights_unclear and blocker_severity >= 1:
+    if blocker_severity >= 3 and not has_fix:
+        return "Level 3"
+    if meaningful_capabilities and blocker_severity <= 2:
+        if weights_gap or has_fix or repo.readiness_label == "weak":
             return "Level 3"
-        if weights_available or has_fix or blocker_severity <= 1:
-            return "Level 2"
-    if plausible_runnable_path and (has_fix or blocker_severity <= 2):
-        if infra_friction or weights_unclear or repo.readiness_label == "weak":
-            return "Level 3"
-    if plausible_runnable_path and blocker_severity <= 2:
         return "Level 2"
-    if runnable_score >= 2 or has_fix:
+    if has_fix or runnable_score >= 2:
         return "Level 3"
     return "Level 4"
 
 
-def _has_plausible_runnable_path(repo: RepoCandidate, runnable_score: int) -> bool:
-    if not repo.entrypoint_signals:
+def _has_credible_runnable_path(
+    repo: RepoCandidate,
+    hf_status: HFModelStatus,
+    issue_signals: list[IssueFixSignal],
+    weights_url: str | None = None,
+) -> bool:
+    capabilities = set(_normalized_capabilities(repo))
+    if capabilities == {RepoCapability.unclear} and not repo.entrypoint_signals:
         return False
-    if runnable_score >= 4:
+
+    install_visible = repo.has_readme or bool(repo.setup_signals)
+    has_fix = _has_credible_fix(issue_signals)
+
+    if RepoCapability.smoke_test in capabilities and repo.entrypoint_signals and install_visible:
         return True
-    return repo.has_readme and len(repo.setup_signals) >= 1 and runnable_score >= 3
+    if RepoCapability.training in capabilities and install_visible and any(signal in repo.entrypoint_signals for signal in ("train.py", "scripts/")):
+        return True
+    if RepoCapability.evaluation in capabilities and install_visible and any(signal in repo.entrypoint_signals for signal in ("scripts/", "notebook")):
+        return True
+    if capabilities & {RepoCapability.demo, RepoCapability.inference}:
+        if repo.entrypoint_signals and install_visible:
+            return True
+
+    return bool(repo.entrypoint_signals and install_visible and (has_fix or runnable_score_hint(repo) >= 2))
 
 
-def _has_infra_friction(issue_signals: list[IssueFixSignal]) -> bool:
+def runnable_score_hint(repo: RepoCandidate) -> int:
+    return min(len(repo.entrypoint_signals), 4) + min(len(repo.setup_signals), 4) + (1 if repo.has_readme else 0)
+
+
+def _repo_requires_external_weights(repo: RepoCandidate, issue_signals: list[IssueFixSignal]) -> bool:
+    repo_text = " ".join([*repo.entrypoint_signals, *repo.setup_signals]).lower()
+    if any(token in repo_text for token in ("weight", "checkpoint", "ckpt")):
+        return True
     for signal in issue_signals:
         text = f"{signal.blocker_category or ''} {signal.blocker}".lower()
-        if _signal_blocker_severity(signal) >= 2 and any(token in text for token in ("cuda", "version", "fork")):
+        if "weight" in text or "checkpoint" in text:
             return True
     return False
 
@@ -286,26 +363,25 @@ def _pick_verdict(tthw: str) -> str:
     return "NO-GO"
 
 
-def _what_breaks(issue_signals: list[IssueFixSignal], repo: RepoCandidate) -> str:
-    if issue_signals:
-        blockers = [signal.blocker.strip() for signal in issue_signals if signal.blocker.strip()]
-        return "; ".join(blockers[:2]) if blockers else "Issue blockers unresolved"
-    if len(repo.setup_signals) < 2:
-        return "Setup path incomplete"
-    if not repo.entrypoint_signals:
-        return "No runnable entrypoint"
-    return "No major blocker"
+def _what_breaks(
+    blockers: list[tuple[str, int]],
+) -> str:
+    if not blockers:
+        return "No concrete blocker visible"
+    return "; ".join(message for message, _ in blockers[:2])
 
 
-def _fix_summary(issue_signals: list[IssueFixSignal]) -> str:
+def _fix_summary(issue_signals: list[IssueFixSignal], repo: RepoCandidate) -> str:
     fixes = [signal.fix.strip() for signal in issue_signals if signal.fix and signal.fix.strip()]
-    if not fixes:
-        return "No clear fix found"
-    return "; ".join(fixes[:2])
+    if fixes:
+        return "; ".join(fixes[:2])
+    return "No clear fix found"
 
 
 def _hf_text(status: HFModelStatus) -> str:
     if status.status == "found":
+        if status.notes == "User-provided weights URL":
+            return "User-provided weights"
         if status.gated:
             return f"Hugging Face model gated ({status.model_id or 'unknown id'})"
         return f"Hugging Face model found ({status.model_id or 'unknown id'})"
@@ -314,18 +390,135 @@ def _hf_text(status: HFModelStatus) -> str:
     return "Hugging Face status unclear"
 
 
-def _technical_debt(repo: RepoCandidate, issue_signals: list[IssueFixSignal], hf_status: HFModelStatus) -> str:
+def _technical_debt(
+    repo: RepoCandidate,
+    issue_signals: list[IssueFixSignal],
+    hf_status: HFModelStatus,
+    ref: str | None = None,
+    weights_url: str | None = None,
+) -> str:
     debt_items: list[str] = []
     issue_text = " ".join(
         f"{signal.blocker_category or ''} {signal.blocker} {signal.fix or ''}".lower()
         for signal in issue_signals
     )
+
     if "pin" in issue_text or "version" in issue_text:
-        debt_items.append("unresolved version pinning")
-    if hf_status.status != "found":
-        debt_items.append("unclear weight provenance")
+        debt_items.append("dependency versions unspecified")
     if "fork" in issue_text:
         debt_items.append("stale fork dependency")
-    if len(repo.setup_signals) < 2 or not repo.has_readme:
-        debt_items.append("missing install instructions")
-    return ", ".join(debt_items) if debt_items else "Low unresolved risk"
+    if not repo.has_readme and not repo.setup_signals:
+        debt_items.append("install path ambiguous")
+    if _repo_requires_external_weights(repo, issue_signals) and hf_status.status != "found" and not weights_url:
+        debt_items.append("checkpoint provenance unclear")
+    elif weights_url:
+        debt_items.append("user-supplied weights provenance")
+    if _dataset_bootstrap_manual(issue_signals):
+        debt_items.append("dataset bootstrap manual")
+    if not ref and _stale_branch_ambiguity(repo):
+        debt_items.append("stale branch ambiguity")
+
+    capability_debt = _capability_debt(repo)
+    if capability_debt:
+        debt_items.append(capability_debt)
+
+    return ", ".join(debt_items) if debt_items else "None identified"
+
+
+def _capability_debt(repo: RepoCandidate) -> str | None:
+    capabilities = set(_normalized_capabilities(repo))
+    if capabilities == {RepoCapability.unclear}:
+        return "repo capability unclear"
+    if capabilities == {RepoCapability.smoke_test}:
+        return "repo appears limited to smoke tests"
+    return None
+
+
+def _repo_blockers(
+    repo: RepoCandidate,
+    issue_signals: list[IssueFixSignal],
+    hf_status: HFModelStatus,
+    weights_url: str | None = None,
+) -> list[tuple[str, int]]:
+    blockers: list[tuple[str, int]] = []
+    issue_seen: set[str] = set()
+    credible_path = _has_credible_runnable_path(repo, hf_status, issue_signals, weights_url=weights_url)
+    meaningful_capabilities = _meaningful_capabilities(repo)
+
+    for signal in issue_signals:
+        blocker = (signal.blocker or "").strip()
+        if not blocker:
+            continue
+        if blocker not in issue_seen:
+            blockers.append((blocker, _signal_blocker_severity(signal)))
+            issue_seen.add(blocker)
+
+    if repo.archived:
+        blockers.append(("stale or archived repo", 2))
+    elif _repo_stale(repo):
+        blockers.append(("stale or archived repo", 1))
+
+    if not repo.has_readme and not repo.setup_signals:
+        blockers.append(("no clear install path", 2))
+
+    if not credible_path:
+        if meaningful_capabilities:
+            runtime_capabilities = {RepoCapability.demo, RepoCapability.inference}
+            if set(meaningful_capabilities).isdisjoint(runtime_capabilities):
+                blockers.append(("no clear inference/demo entrypoint", 2))
+            else:
+                blockers.append(("no clear runnable entrypoint", 2))
+        else:
+            blockers.append(("no obvious runnable entrypoint for any meaningful capability", 3))
+
+    if _repo_requires_external_weights(repo, issue_signals) and hf_status.status != "found" and not weights_url:
+        blockers.append(("external checkpoints/weights not linked", 2))
+
+    if _dataset_bootstrap_manual(issue_signals):
+        blockers.append(("dataset must be supplied manually", 2))
+
+    if _environment_ambiguity(issue_signals):
+        blockers.append(("environment/CUDA/version ambiguity", 2))
+
+    if blockers and not _has_credible_fix(issue_signals) and any(severity >= 3 for _, severity in blockers):
+        blockers.append(("fix path unclear", 1))
+
+    compact: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for message, severity in blockers:
+        if message in seen:
+            continue
+        compact.append((message, severity))
+        seen.add(message)
+    return compact
+
+
+def _repo_stale(repo: RepoCandidate) -> bool:
+    return "activity=stale" in (repo.readiness_summary or "").lower()
+
+
+def _dataset_bootstrap_manual(issue_signals: list[IssueFixSignal]) -> bool:
+    text = " ".join(f"{signal.blocker_category or ''} {signal.blocker}".lower() for signal in issue_signals)
+    return "dataset" in text and any(token in text for token in ("manual", "supply", "download", "bootstrap"))
+
+
+def _environment_ambiguity(issue_signals: list[IssueFixSignal]) -> bool:
+    text = " ".join(f"{signal.blocker_category or ''} {signal.blocker}".lower() for signal in issue_signals)
+    return any(token in text for token in ("cuda", "environment", "version", "dependency")) and any(
+        token in text for token in ("ambigu", "mismatch", "incompatible", "unspecified")
+    )
+
+
+def _stale_branch_ambiguity(repo: RepoCandidate) -> bool:
+    capabilities = set(_normalized_capabilities(repo))
+    return _repo_stale(repo) and bool(capabilities & {RepoCapability.training, RepoCapability.evaluation})
+
+
+def _weights_are_primary_blocker(issue_signals: list[IssueFixSignal]) -> bool:
+    if not issue_signals:
+        return False
+    for signal in issue_signals:
+        text = f"{signal.blocker_category or ''} {signal.blocker}".lower()
+        if "weight" not in text and "checkpoint" not in text:
+            return False
+    return True

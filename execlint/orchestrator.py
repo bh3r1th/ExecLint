@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from time import monotonic
 from typing import Any
+from urllib.parse import urlsplit
 
 from execlint.analyzers.hf_status import check_hf_status
 from execlint.analyzers.issue_miner import mine_issue_signals
@@ -13,7 +14,7 @@ from execlint.clients.arxiv_client import ArxivClient
 from execlint.clients.github_client import GitHubClient
 from execlint.clients.hf_client import HFClient
 from execlint.config import SOFT_EXECUTION_BUDGET_SECONDS
-from execlint.models import ExecutionReport, HFModelStatus, IssueFixSignal, RepoCandidate
+from execlint.models import ArxivPaper, ExecutionInput, ExecutionReport, HFModelStatus, IssueFixSignal, RepoCandidate
 from execlint.utils.text import extract_arxiv_id, normalize_arxiv_url
 
 
@@ -33,6 +34,22 @@ def audit_arxiv_url(arxiv_url: str) -> tuple[ExecutionReport, list[str]]:
 
 
 def audit_arxiv_url_with_debug(arxiv_url: str) -> tuple[ExecutionReport, list[str], dict[str, Any]]:
+    return _audit_with_debug(arxiv_url=arxiv_url, execution_input=None)
+
+
+def audit_execution_input(execution_input: ExecutionInput) -> tuple[ExecutionReport, list[str]]:
+    report, warnings, _ = audit_execution_input_with_debug(execution_input)
+    return report, warnings
+
+
+def audit_execution_input_with_debug(execution_input: ExecutionInput) -> tuple[ExecutionReport, list[str], dict[str, Any]]:
+    return _audit_with_debug(arxiv_url=execution_input.arxiv_url.unicode_string(), execution_input=execution_input)
+
+
+def _audit_with_debug(
+    arxiv_url: str,
+    execution_input: ExecutionInput | None,
+) -> tuple[ExecutionReport, list[str], dict[str, Any]]:
     normalized_url = normalize_arxiv_url(arxiv_url)
     arxiv_id = extract_arxiv_id(normalized_url)
 
@@ -57,6 +74,17 @@ def audit_arxiv_url_with_debug(arxiv_url: str) -> tuple[ExecutionReport, list[st
         warnings.append(PARTIAL_FAILURE_WARNINGS["budget"])
         source_failures.append("budget")
         candidates = []
+    elif execution_input is not None:
+        try:
+            explicit_candidate = _repo_candidate_from_execution_input(execution_input)
+            discovered = [explicit_candidate]
+            candidates, _ = triage_repositories(candidates=discovered, github=github_client, ref=execution_input.ref)
+        except ValueError:
+            raise
+        except Exception:
+            warnings.append(PARTIAL_FAILURE_WARNINGS["github_discovery"])
+            source_failures.append("github_discovery")
+            candidates = []
     else:
         try:
             discovered = discover_repositories(paper=paper, github=github_client)
@@ -74,11 +102,14 @@ def audit_arxiv_url_with_debug(arxiv_url: str) -> tuple[ExecutionReport, list[st
             report.fix = "Unavailable: GitHub discovery failed"
             report.technical_debt = "Unknown due to unavailable repository data"
         return report, warnings, _debug_payload(
+            paper=paper,
             discovered=discovered,
             candidates=[],
             issue_signals_by_repo={},
             hf_status=hf_status,
             source_failures=source_failures,
+            execution_input=execution_input,
+            report=report,
         )
 
     issue_signals_by_repo: dict[str, list[IssueFixSignal]] = {}
@@ -105,7 +136,11 @@ def audit_arxiv_url_with_debug(arxiv_url: str) -> tuple[ExecutionReport, list[st
         hf_status = HFModelStatus(status="unknown", notes="Skipped due to soft execution budget")
     else:
         try:
-            hf_status = check_hf_status(paper=paper, hf_client=hf_client)
+            hf_status = check_hf_status(
+                paper=paper,
+                hf_client=hf_client,
+                weights_url=execution_input.weights_url.unicode_string() if execution_input and execution_input.weights_url else None,
+            )
         except Exception:
             warnings.append(PARTIAL_FAILURE_WARNINGS["hf_unavailable"])
             source_failures.append("hf_unavailable")
@@ -115,15 +150,22 @@ def audit_arxiv_url_with_debug(arxiv_url: str) -> tuple[ExecutionReport, list[st
         candidates=candidates,
         issue_signals_by_repo=issue_signals_by_repo,
         hf_status=hf_status,
+        ref=execution_input.ref if execution_input else None,
+        weights_url=execution_input.weights_url.unicode_string() if execution_input and execution_input.weights_url else None,
     )
     _apply_partial_result_wording(report=report, source_failures=source_failures, issue_signals_by_repo=issue_signals_by_repo)
+    if execution_input is not None:
+        report.best_repo = execution_input.repo_url.unicode_string()
     return report, warnings, _debug_payload(
+        paper=paper,
         discovered=discovered,
         candidates=candidates,
         issue_signals_by_repo=issue_signals_by_repo,
         hf_status=hf_status,
         source_failures=source_failures,
         selected_repo_url=report.best_repo,
+        execution_input=execution_input,
+        report=report,
     )
 
 
@@ -140,12 +182,15 @@ def _high_signal_issue_count(signals: list[IssueFixSignal]) -> int:
     return sum(1 for signal in signals if _signal_severity(signal) >= 2)
 
 def _debug_payload(
+    paper: ArxivPaper,
     discovered: list[RepoCandidate],
     candidates: list[RepoCandidate],
     issue_signals_by_repo: dict[str, list[IssueFixSignal]],
     hf_status: HFModelStatus,
     source_failures: list[str],
     selected_repo_url: str | None = None,
+    execution_input: ExecutionInput | None = None,
+    report: ExecutionReport | None = None,
 ) -> dict[str, Any]:
     selected_repo = None
     if selected_repo_url:
@@ -160,15 +205,26 @@ def _debug_payload(
                 category_counter["uncategorized"] += 1
 
     selected_signals = issue_signals_by_repo.get(selected_repo.full_name, []) if selected_repo else []
+    blocker_severity = max((_signal_severity(signal) for signal in selected_signals), default=0)
+    if blocker_severity == 0 and report and report.what_breaks and report.what_breaks != "No concrete blocker visible":
+        blocker_severity = _report_breaker_severity(report.what_breaks)
 
     return {
+        "paper_title": paper.title,
+        "paper_authors": list(paper.authors),
+        "paper_abstract": paper.abstract,
+        "paper_code_url": paper.code_url.unicode_string() if paper.code_url else None,
+        "paper_code_url_source": paper.code_url_source,
+        "ref": execution_input.ref if execution_input else None,
+        "weights_source": _weights_source(hf_status, execution_input),
+        "inferred_capabilities": [getattr(capability, "value", capability) for capability in (selected_repo.inferred_capabilities if selected_repo else [])],
         "discovered_repo_count": len(discovered),
         "candidate_count": len(candidates),
         "selected_repo_name": selected_repo.full_name if selected_repo else "none",
         "selected_repo_readiness": selected_repo.readiness_label if selected_repo else "n/a",
         "selected_repo_fix_signal_count": sum(1 for signal in selected_signals if signal.fix and signal.fix.strip()),
         "selected_repo_has_fix_path": _has_credible_fix(selected_signals),
-        "selected_repo_blocker_severity": SEVERITY_LABELS[max((_signal_severity(signal) for signal in selected_signals), default=0)],
+        "selected_repo_blocker_severity": SEVERITY_LABELS[blocker_severity],
         "top_blocker_categories": [name for name, _ in category_counter.most_common(3)],
         "hf_summary": _hf_debug_summary(hf_status),
         "partial_source_failures": list(dict.fromkeys(source_failures)),
@@ -200,3 +256,54 @@ def _apply_partial_result_wording(
         has_any_fix = any(signal.fix and signal.fix.strip() for signals in issue_signals_by_repo.values() for signal in signals)
         if not has_any_fix:
             report.fix = "Unavailable: issue mining failed"
+
+
+def _repo_candidate_from_execution_input(execution_input: ExecutionInput) -> RepoCandidate:
+    parsed = urlsplit(execution_input.repo_url.unicode_string())
+    if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
+        raise ValueError("repo_url must be a GitHub repository URL")
+
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if len(segments) < 2:
+        raise ValueError("repo_url must point to a GitHub repository")
+
+    owner, name = segments[0], segments[1]
+    full_name = f"{owner}/{name}"
+    return RepoCandidate(
+        name=name,
+        full_name=full_name,
+        url=execution_input.repo_url.unicode_string(),
+        owner_login=owner,
+        default_branch=execution_input.ref or "main",
+        discovery_score=1000.0,
+        discovery_reasons=["user_repo_url(+1000)"],
+    )
+
+
+def _weights_source(hf_status: HFModelStatus, execution_input: ExecutionInput | None) -> str:
+    if execution_input and execution_input.weights_url:
+        return "provided"
+    if hf_status.status == "found":
+        return "discovered"
+    return "none"
+
+
+def _report_breaker_severity(what_breaks: str) -> int:
+    text = what_breaks.lower()
+    if any(token in text for token in ("no obvious runnable entrypoint", "no repository candidate")):
+        return 3
+    if any(
+        token in text
+        for token in (
+            "external checkpoints/weights not linked",
+            "no clear install path",
+            "dataset must be supplied manually",
+            "environment/cuda/version ambiguity",
+            "no clear runnable entrypoint",
+            "no clear inference/demo entrypoint",
+        )
+    ):
+        return 2
+    if any(token in text for token in ("stale or archived repo", "fix path unclear", "repository discovery unavailable")):
+        return 1
+    return 0

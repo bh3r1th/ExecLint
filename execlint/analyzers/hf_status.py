@@ -6,7 +6,16 @@ from execlint.clients.hf_client import HFClient
 from execlint.models import ArxivPaper, HFModelStatus
 
 
-def check_hf_status(paper: ArxivPaper, hf_client: HFClient) -> HFModelStatus:
+def check_hf_status(paper: ArxivPaper, hf_client: HFClient, weights_url: str | None = None) -> HFModelStatus:
+    if weights_url:
+        gated = "huggingface.co" in weights_url.lower() and "/resolve/" not in weights_url.lower()
+        return HFModelStatus(
+            status="found",
+            model_id=weights_url,
+            gated=gated,
+            notes="User-provided weights URL",
+        )
+
     queries = _queries(paper)
     best: tuple[float, dict] | None = None
 

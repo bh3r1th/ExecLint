@@ -7,7 +7,8 @@
       "readiness_label": "strong",
       "has_readme": true,
       "setup_signals": ["requirements.txt", "pip_install"],
-      "entrypoint_signals": ["train.py"]
+      "entrypoint_signals": ["infer.py"],
+      "inferred_capabilities": ["inference"]
     }
   ],
   "issue_signals_by_repo": {
