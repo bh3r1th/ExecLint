@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from execlint.analyzers.execution_path import analyze_execution_path
@@ -8,10 +9,10 @@ from execlint.models import RepoCapability, RepoCandidate
 
 SETUP_FILES = ("requirements.txt", "pyproject.toml", "environment.yml", "setup.py")
 ENTRYPOINT_FILES = ("train.py", "infer.py", "inference.py", "demo.py", "app.py", "smoke_test.py")
-DEMO_TOKENS = ("demo.py", "app.py", "gradio", "streamlit")
-INFERENCE_PATH_TOKENS = ("infer.py", "inference.py", "predict.py", "generate.py", "generation.py")
+DEMO_README_TOKENS = (" web demo", "streamlit", "gradio", "demo app", "launch demo", "live demo")
+INFERENCE_PATH_TOKENS = ("infer.py", "inference.py", "predict.py")
 INFERENCE_SERVER_TOKENS = ("serve.py", "server.py", "api.py")
-INFERENCE_README_TOKENS = ("run inference", "inference usage", "predict", "prediction", "text generation", "generate text")
+INFERENCE_README_TOKENS = ("run inference", "inference usage", "predict with", "run predict", "serving")
 TRAINING_TOKENS = ("train.py", "trainer", "training", "checkpoint", "finetune")
 EVALUATION_TOKENS = ("eval.py", "evaluate.py", "benchmark", "metrics")
 SMOKE_TEST_TOKENS = ("smoke_test.py", "sanity", "toy", "quickstart")
@@ -98,7 +99,7 @@ def _infer_capabilities(readme_text: str, paths: list[str]) -> list[RepoCapabili
     readme_lower = readme_text.lower()
     capabilities: list[RepoCapability] = []
 
-    if _contains_any(lowered_paths + [readme_lower], DEMO_TOKENS):
+    if _has_strong_demo_signal(lowered_paths, readme_lower):
         capabilities.append(RepoCapability.demo)
     if _has_strong_inference_signal(lowered_paths, readme_lower):
         capabilities.append(RepoCapability.inference)
@@ -119,11 +120,26 @@ def _contains_any(haystacks: list[str], needles: tuple[str, ...]) -> bool:
 
 
 def _has_strong_inference_signal(paths: list[str], readme_text: str) -> bool:
-    if _contains_any(paths, INFERENCE_PATH_TOKENS):
+    if any(path.endswith(token) for path in paths for token in INFERENCE_PATH_TOKENS):
+        return True
+    has_explicit_inference_command = bool(
+        re.search(r"(?im)^\s*(?:\$\s*)?(?:python|bash|make)\s+[^\n]*(infer|inference|predict|serve|server)\b", readme_text)
+    )
+    if has_explicit_inference_command:
         return True
     if _contains_any(paths, INFERENCE_SERVER_TOKENS) and _contains_any([readme_text], INFERENCE_README_TOKENS):
         return True
-    return _contains_any([readme_text], ("run inference", "inference usage", "predict with", "usage: inference"))
+    return False
+
+
+def _has_strong_demo_signal(paths: list[str], readme_text: str) -> bool:
+    if any(path.endswith("app.py") for path in paths):
+        return True
+    if _contains_any(paths + [readme_text], ("gradio", "streamlit")):
+        return True
+    if _contains_any([f" {readme_text}"], DEMO_README_TOKENS):
+        return True
+    return bool(re.search(r"(?i)\bdemo\b", readme_text) and re.search(r"(?i)\b(run|launch|start|open)\b", readme_text))
 
 
 def _activity_score(pushed_at: str | None) -> float:
