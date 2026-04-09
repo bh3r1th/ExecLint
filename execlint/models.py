@@ -73,6 +73,8 @@ class ExecutionReport(BaseModel):
     tthw: Literal["Level 1", "Level 2", "Level 3", "Level 4"]
     best_repo: str
     runnable_for: str = "unclear"
+    execution_path: str = "No extracted execution commands"
+    gaps: str = "None identified"
     not_clearly_supported: str = ""
     what_breaks: str
     fix: str

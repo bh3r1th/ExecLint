@@ -53,6 +53,8 @@ def test_cli_output_includes_paper_title_and_code_url(monkeypatch) -> None:
     assert "- Time-to-Hello-World (TTHW): Level 2 — minor setup required" in out
     assert "- Best Repo:" not in out
     assert "- Runnable For: unclear" in out
+    assert "- Execution Path: No extracted execution commands" in out
+    assert "- Gaps: None identified" in out
     assert "- Not Clearly Supported: None identified" in out
     assert "debug_signals:" not in out
 
@@ -101,6 +103,8 @@ def test_cli_debug_output_handles_partial_signals(monkeypatch) -> None:
     assert "- Code URL: https://github.com/org/demo" in out
     assert "- Time-to-Hello-World (TTHW): Level 4 — no credible runnable path" in out
     assert "- Best Repo:" not in out
+    assert "- Execution Path: No extracted execution commands" in out
+    assert "- Gaps: None identified" in out
     assert "debug_signals:" in out
     assert "- inferred capabilities: demo, inference" in out
     assert "- readiness: n/a" in out
@@ -223,7 +227,11 @@ def test_cli_output_format_is_stable_and_repo_url_is_required_internally(monkeyp
         "- Verdict: GO",
         "- Time-to-Hello-World (TTHW): Level 1 — runnable immediately",
         "- Runnable For: demo",
+        "- Execution Path: No extracted execution commands",
+        "- Gaps: None identified",
         "- Not Clearly Supported: None identified",
+    ]
+    assert out[10:12] == [
         "- What Breaks: No concrete blocker visible",
         "- Fix (if any): No clear fix found",
     ]
@@ -261,3 +269,59 @@ def test_cli_tthw_line_includes_exact_meaning(monkeypatch, level: str, meaning: 
         app(["https://arxiv.org/abs/1234.5678", "--repo", "https://github.com/org/demo"])
 
     assert f"- Time-to-Hello-World (TTHW): {level} — {meaning}" in stdout.getvalue()
+
+
+def test_cli_output_includes_execution_path_and_gaps(monkeypatch) -> None:
+    report = ExecutionReport(
+        verdict="CAUTION",
+        tthw="Level 3",
+        best_repo="https://github.com/org/demo",
+        runnable_for="training, evaluation",
+        execution_path="install: pip install -r requirements.txt; run: python train.py; evaluate: python eval.py",
+        gaps="dataset must be supplied manually; env version unclear",
+        not_clearly_supported="demo, inference",
+        what_breaks="dataset must be supplied manually",
+        fix="Use provided dataset script",
+        hf_status="Hugging Face status unclear",
+        technical_debt="dataset bootstrap manual",
+    )
+    monkeypatch.setattr(
+        "execlint.cli.audit_execution_input_with_debug",
+        lambda execution_input: (report, [], {"paper_title": "Demo Paper"}),
+    )
+
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        app(["https://arxiv.org/abs/1234.5678", "--repo", "https://github.com/org/demo"])
+    out = stdout.getvalue()
+
+    assert "- Execution Path: install: pip install -r requirements.txt; run: python train.py; evaluate: python eval.py" in out
+    assert "- Gaps: dataset must be supplied manually; env version unclear" in out
+
+
+def test_cli_output_when_no_execution_path_has_clear_gaps_text(monkeypatch) -> None:
+    report = ExecutionReport(
+        verdict="NO-GO",
+        tthw="Level 4",
+        best_repo="https://github.com/org/demo",
+        runnable_for="unclear",
+        execution_path="No extracted execution commands",
+        gaps="install path ambiguous; no clear run command",
+        not_clearly_supported="meaningful execution modes",
+        what_breaks="no obvious runnable entrypoint for any meaningful capability",
+        fix="No clear fix found",
+        hf_status="Hugging Face status unclear",
+        technical_debt="install path ambiguous",
+    )
+    monkeypatch.setattr(
+        "execlint.cli.audit_execution_input_with_debug",
+        lambda execution_input: (report, [], {"paper_title": "Demo Paper"}),
+    )
+
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        app(["https://arxiv.org/abs/1234.5678", "--repo", "https://github.com/org/demo"])
+    out = stdout.getvalue()
+
+    assert "- Execution Path: No extracted execution commands" in out
+    assert "- Gaps: install path ambiguous; no clear run command" in out
