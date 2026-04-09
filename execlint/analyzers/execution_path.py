@@ -5,9 +5,8 @@ import re
 from pydantic import BaseModel, Field
 
 STEP_ORDER = ("install", "setup_data", "setup_weights", "run", "evaluate")
-COMMAND_PATTERN = re.compile(
-    r"(?im)^\s*(?:\$|>\s*)?\s*((?:pip\s+install|conda\s+create|python\s+\S+\.py|bash\s+\S+\.sh|make(?:\s+\S+)?|docker(?:\s+\S+)+)[^\n]*)"
-)
+ALLOWED_PREFIXES = ("pip", "conda", "python", "bash", "make", "docker")
+COMMAND_PREFIX_PATTERN = re.compile(r"(?i)^\s*(?:\$|>)?\s*(pip|conda|python|bash|make|docker)\b")
 MANUAL_DATA_PATTERN = re.compile(
     r"(?i)\b(dataset|data)\b.*\b(download|provide|place|put|copy|prepare|manual|manually)\b|\b(manual|manually)\b.*\b(dataset|data)\b"
 )
@@ -15,6 +14,9 @@ MANUAL_WEIGHTS_PATTERN = re.compile(
     r"(?i)\b(weights?|checkpoints?)\b.*\b(download|provide|place|put|copy|manual|manually|obtain)\b|\b(manual|manually)\b.*\b(weights?|checkpoints?)\b"
 )
 ENV_VERSION_PATTERN = re.compile(r"(?i)\b(python|cuda|pytorch|torch)\b[^.\n]{0,40}\b(>=|<=|==|~=|\d+\.\d+)")
+MAX_STEP_COUNT = 5
+MAX_COMMAND_LINES_FOR_LONG_BLOCK = 20
+MAX_COMMANDS_FOR_LONG_BLOCK = 5
 
 
 class ExecutionPathAnalysis(BaseModel):
@@ -35,7 +37,7 @@ def analyze_execution_path(readme_text: str, paths: list[str]) -> ExecutionPathA
         normalized_steps[inferred[0]].append(inferred[1])
 
     for step in STEP_ORDER:
-        normalized_steps[step] = sorted(dict.fromkeys(normalized_steps[step]))
+        normalized_steps[step] = list(dict.fromkeys(normalized_steps[step]))
 
     gaps: list[str] = []
     missing_prerequisites: list[str] = []
@@ -62,21 +64,40 @@ def analyze_execution_path(readme_text: str, paths: list[str]) -> ExecutionPathA
     if not has_env_versions:
         gaps.append("env version unclear")
 
-    deduped_steps = {step: commands for step, commands in normalized_steps.items() if commands}
+    summarized_steps = _summarize_steps(normalized_steps)
     return ExecutionPathAnalysis(
-        execution_steps=deduped_steps,
+        execution_steps=summarized_steps,
         missing_prerequisites=sorted(dict.fromkeys(missing_prerequisites)),
         gaps=sorted(dict.fromkeys(gaps)),
     )
 
 
 def _extract_commands(readme_text: str) -> list[str]:
-    return [match.group(1).strip() for match in COMMAND_PATTERN.finditer(readme_text or "")]
+    command_lines: list[str] = []
+    for raw_line in (readme_text or "").splitlines():
+        matched = COMMAND_PREFIX_PATTERN.match(raw_line)
+        if not matched:
+            continue
+        cleaned = _clean_command_line(raw_line)
+        if not cleaned:
+            continue
+        prefix = cleaned.split(maxsplit=1)[0].lower()
+        if prefix in ALLOWED_PREFIXES:
+            command_lines.append(cleaned)
+
+    if len(command_lines) > MAX_COMMAND_LINES_FOR_LONG_BLOCK:
+        command_lines = command_lines[:MAX_COMMANDS_FOR_LONG_BLOCK]
+    return command_lines
+
+
+def _clean_command_line(line: str) -> str:
+    command = re.sub(r"^\s*(?:\$|>)\s*", "", line.strip())
+    return re.sub(r"\s+", " ", command).strip()
 
 
 def _classify_command(command: str) -> str:
     lowered = command.lower()
-    if lowered.startswith(("pip install", "conda create", "docker build", "docker pull")):
+    if lowered.startswith(("pip", "conda", "docker build", "docker pull")):
         return "install"
     if lowered.startswith("make"):
         if any(token in lowered for token in ("eval", "benchmark", "test")):
@@ -93,20 +114,33 @@ def _classify_command(command: str) -> str:
     if lowered.startswith("python"):
         if any(token in lowered for token in ("eval", "evaluate", "benchmark", "metric", "test")):
             return "evaluate"
-        if any(token in lowered for token in ("download", "prepare", "dataset", "data")):
-            return "setup_data"
         if any(token in lowered for token in ("weight", "checkpoint")):
             return "setup_weights"
+        if any(token in lowered for token in ("download", "prepare", "dataset", "data")):
+            return "setup_data"
         return "run"
     if lowered.startswith("bash"):
         if any(token in lowered for token in ("eval", "benchmark", "test")):
             return "evaluate"
-        if any(token in lowered for token in ("download", "prepare", "dataset", "data")):
-            return "setup_data"
         if any(token in lowered for token in ("weight", "checkpoint")):
             return "setup_weights"
+        if any(token in lowered for token in ("download", "prepare", "dataset", "data")):
+            return "setup_data"
         return "run"
     return "run"
+
+
+def _summarize_steps(normalized_steps: dict[str, list[str]]) -> dict[str, list[str]]:
+    summarized: dict[str, list[str]] = {}
+    for step in STEP_ORDER:
+        commands = normalized_steps.get(step, [])
+        if not commands:
+            continue
+        # Keep a short, high-signal command chain per step.
+        summarized[step] = [" | ".join(commands[:2])]
+        if len(summarized) >= MAX_STEP_COUNT:
+            break
+    return summarized
 
 
 def _infer_steps_from_paths(paths: list[str]) -> list[tuple[str, str]]:
@@ -114,7 +148,7 @@ def _infer_steps_from_paths(paths: list[str]) -> list[tuple[str, str]]:
     lowered_paths = [path.lower() for path in paths]
 
     if any(path.endswith(("requirements.txt", "pyproject.toml", "environment.yml", "setup.py")) for path in lowered_paths):
-        inferred.append(("install", "inferred from repo files"))
+        inferred.append(("install", "pip install -r requirements.txt"))
 
     script_paths = [path for path in lowered_paths if path.startswith("scripts/")]
     for path in script_paths:
