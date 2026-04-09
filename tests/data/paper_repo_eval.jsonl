@@ -1,0 +1,15 @@
+{"name":"LoRA","arxiv_url":"https://arxiv.org/abs/2106.09685","repo_url":"https://github.com/microsoft/LoRA","expected_bucket":"clean"}
+{"name":"SAM","arxiv_url":"https://arxiv.org/abs/2304.02643","repo_url":"https://github.com/facebookresearch/segment-anything","expected_bucket":"clean"}
+{"name":"LLaMA","arxiv_url":"https://arxiv.org/abs/2302.13971","repo_url":"https://github.com/facebookresearch/llama","expected_bucket":"clean"}
+{"name":"RAFT","arxiv_url":"https://arxiv.org/abs/2003.12039","repo_url":"https://github.com/princeton-vl/RAFT","expected_bucket":"clean"}
+{"name":"Detectron2","arxiv_url":"https://arxiv.org/abs/1909.06130","repo_url":"https://github.com/facebookresearch/detectron2","expected_bucket":"clean"}
+{"name":"RL-RAG-SLO","arxiv_url":"https://arxiv.org/abs/2601.00841","repo_url":"https://github.com/bh3r1th/rl-rag-slo-controller","expected_bucket":"messy"}
+{"name":"LongNet","arxiv_url":"https://arxiv.org/abs/2307.02486","repo_url":"https://github.com/microsoft/torchscale","expected_bucket":"messy"}
+{"name":"RETRO","arxiv_url":"https://arxiv.org/abs/2112.04426","repo_url":"https://github.com/deepmind/deepmind-research","expected_bucket":"messy"}
+{"name":"RAG","arxiv_url":"https://arxiv.org/abs/2005.11401","repo_url":"https://github.com/facebookresearch/DPR","expected_bucket":"messy"}
+{"name":"Toolformer","arxiv_url":"https://arxiv.org/abs/2302.04761","repo_url":"https://github.com/xrsrke/toolformer","expected_bucket":"messy"}
+{"name":"AlphaFold","arxiv_url":"https://arxiv.org/abs/2103.00020","repo_url":"https://github.com/deepmind/alphafold","expected_bucket":"broken"}
+{"name":"Gato","arxiv_url":"https://arxiv.org/abs/2205.06175","repo_url":"https://github.com/deepmind/deepmind-research","expected_bucket":"broken"}
+{"name":"Flamingo","arxiv_url":"https://arxiv.org/abs/2204.14198","repo_url":"https://github.com/lucidrains/flamingo-pytorch","expected_bucket":"broken"}
+{"name":"Chinchilla","arxiv_url":"https://arxiv.org/abs/2203.15556","repo_url":"https://github.com/deepmind/deepmind-research","expected_bucket":"broken"}
+{"name":"PaLM","arxiv_url":"https://arxiv.org/abs/2204.02311","repo_url":"https://github.com/google-research","expected_bucket":"broken"}
