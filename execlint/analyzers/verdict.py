@@ -19,6 +19,13 @@ MEANINGFUL_CAPABILITIES = (
     RepoCapability.evaluation,
     RepoCapability.smoke_test,
 )
+STRONG_OWNER_LOGINS = {
+    "facebookresearch",
+    "meta",
+    "microsoft",
+    "huggingface",
+}
+HIGH_STAR_THRESHOLD = 5000
 
 
 def build_execution_report(
@@ -60,6 +67,15 @@ def build_execution_report(
     if tthw == "Level 4" and _has_declared_runnable_capability(best_repo):
         tthw = "Level 3"
     verdict = _pick_verdict(tthw)
+    verdict, tthw = _apply_caution_overrides(
+        repo=best_repo,
+        issue_signals=issue_signals,
+        blockers=blockers,
+        hf_status=hf_status,
+        verdict=verdict,
+        tthw=tthw,
+        weights_url=weights_url,
+    )
 
     return ExecutionReport(
         verdict=verdict,
@@ -361,6 +377,79 @@ def _pick_verdict(tthw: str) -> str:
     if tthw in {"Level 2", "Level 3"}:
         return "CAUTION"
     return "NO-GO"
+
+
+def _apply_caution_overrides(
+    repo: RepoCandidate,
+    issue_signals: list[IssueFixSignal],
+    blockers: list[tuple[str, int]],
+    hf_status: HFModelStatus,
+    verdict: str,
+    tthw: str,
+    weights_url: str | None = None,
+) -> tuple[str, str]:
+    if verdict != "NO-GO":
+        return verdict, tthw
+
+    if not _has_declared_runnable_capability(repo):
+        return verdict, tthw
+
+    credible_path = _has_credible_runnable_path(repo, hf_status, issue_signals, weights_url=weights_url)
+    if not credible_path:
+        return verdict, tthw
+
+    if _has_non_weights_critical_breakage(blockers):
+        return verdict, tthw
+
+    strong_repo = _repo_appears_strong(repo)
+    weights_limited = _weights_limited_but_otherwise_valid(repo, issue_signals, hf_status, weights_url=weights_url)
+
+    if strong_repo or weights_limited:
+        return "CAUTION", "Level 3"
+    return verdict, tthw
+
+
+def _repo_appears_strong(repo: RepoCandidate) -> bool:
+    owner = (repo.owner_login or "").strip().lower()
+    return owner in STRONG_OWNER_LOGINS or repo.stars >= HIGH_STAR_THRESHOLD or repo.readiness_label == "strong"
+
+
+def _has_non_weights_critical_breakage(blockers: list[tuple[str, int]]) -> bool:
+    for message, severity in blockers:
+        text = message.lower()
+        is_weight_blocker = "weight" in text or "checkpoint" in text or "gated" in text
+        if severity >= 3 and not is_weight_blocker:
+            return True
+    return False
+
+
+def _weights_limited_but_otherwise_valid(
+    repo: RepoCandidate,
+    issue_signals: list[IssueFixSignal],
+    hf_status: HFModelStatus,
+    weights_url: str | None = None,
+) -> bool:
+    if weights_url:
+        return False
+
+    weights_required = _repo_requires_external_weights(repo, issue_signals)
+    if not weights_required:
+        return False
+
+    hf_weights_limited = hf_status.status == "not_found" or bool(hf_status.gated)
+    if not hf_weights_limited:
+        return False
+
+    return not _has_non_weight_signal_critical_breakage(issue_signals)
+
+
+def _has_non_weight_signal_critical_breakage(issue_signals: list[IssueFixSignal]) -> bool:
+    for signal in issue_signals:
+        text = f"{signal.blocker_category or ''} {signal.blocker}".lower()
+        is_weight_signal = "weight" in text or "checkpoint" in text or "gated" in text
+        if _signal_blocker_severity(signal) >= 3 and not is_weight_signal:
+            return True
+    return False
 
 
 def _what_breaks(
