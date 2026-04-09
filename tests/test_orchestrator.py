@@ -246,3 +246,26 @@ def test_orchestrator_uses_provided_weights_and_preserves_repo_url(monkeypatch) 
     assert report.hf_status == "User-provided weights"
     assert debug["weights_source"] == "provided"
     assert isinstance(debug["inferred_capabilities"], list)
+
+
+def test_execution_input_uses_same_arxiv_normalization_path_as_single_paper(monkeypatch) -> None:
+    seen: list[tuple[str, str]] = []
+
+    def _fake_fetch(self, arxiv_id, url):
+        seen.append((arxiv_id, url))
+        return ArxivPaper(arxiv_id=arxiv_id, url=url, title="Demo")
+
+    monkeypatch.setattr("execlint.orchestrator.ArxivClient.fetch_paper", _fake_fetch)
+    monkeypatch.setattr("execlint.orchestrator.discover_repositories", lambda paper, github: [])
+    monkeypatch.setattr("execlint.orchestrator.triage_repositories", lambda candidates, github, ref=None: ([], None))
+
+    audit_arxiv_url("https://arxiv.org/pdf/2106.09685")
+    audit_execution_input_with_debug(
+        ExecutionInput(
+            arxiv_url="https://arxiv.org/pdf/2106.09685",
+            repo_url="https://github.com/org/demo",
+        )
+    )
+
+    assert seen[0] == ("2106.09685", "https://arxiv.org/abs/2106.09685")
+    assert seen[1] == ("2106.09685", "https://arxiv.org/abs/2106.09685")

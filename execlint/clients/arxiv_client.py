@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from html import unescape
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 
 import httpx
 
@@ -12,6 +12,51 @@ from execlint.models import ArxivPaper
 ARXIV_ABS_URL = "https://arxiv.org/abs/"
 GITHUB_HOSTS = {"github.com", "www.github.com"}
 CODE_LINK_TERMS = ("code", "github", "implementation", "official", "repo", "repository", "project")
+
+
+def normalize_arxiv_input(arxiv_input: str) -> tuple[str, str]:
+    original = arxiv_input
+    candidate = arxiv_input.strip()
+    if not candidate:
+        raise ValueError(f"Could not resolve arXiv input: original_input={original!r}")
+
+    parsed = urlparse(candidate)
+    if parsed.scheme and parsed.netloc:
+        host = parsed.netloc.lower()
+        if host not in {"arxiv.org", "www.arxiv.org"}:
+            raise ValueError(
+                f"Could not resolve arXiv input: original_input={original!r}; failing_url={candidate!r}; reason=host"
+            )
+
+        path = parsed.path.strip()
+        if path.startswith("/abs/"):
+            arxiv_id = path[len("/abs/") :]
+        elif path.startswith("/pdf/"):
+            arxiv_id = path[len("/pdf/") :].removesuffix(".pdf")
+        else:
+            raise ValueError(
+                f"Could not resolve arXiv input: original_input={original!r}; failing_url={candidate!r}; reason=path"
+            )
+    else:
+        arxiv_id = candidate
+
+    arxiv_id = arxiv_id.strip()
+    if not arxiv_id:
+        raise ValueError(f"Could not resolve arXiv input: original_input={original!r}")
+
+    base_id = arxiv_id
+    if "v" in arxiv_id:
+        stem, version = arxiv_id.rsplit("v", 1)
+        if version.isdigit():
+            base_id = stem
+
+    if not base_id:
+        raise ValueError(
+            f"Could not resolve arXiv input: original_input={original!r}; normalized_arxiv_id={arxiv_id!r}"
+        )
+
+    abs_url = f"{ARXIV_ABS_URL}{base_id}"
+    return base_id, abs_url
 
 
 class ArxivClient:
