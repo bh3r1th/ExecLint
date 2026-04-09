@@ -242,3 +242,26 @@ def test_no_meaningful_runnable_path_cannot_stay_moderate() -> None:
 
     assert score < 3.5
     assert label == "weak"
+
+
+def test_triage_attaches_execution_path_signals() -> None:
+    class ExecutionPathGitHub(DummyGitHub):
+        def get_readme(self, full_name: str) -> str | None:
+            return """
+            $ pip install -r requirements.txt
+            Dataset must be downloaded manually.
+            python train.py
+            """
+
+        def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+            return ["requirements.txt", "train.py"]
+
+    triaged, _ = triage_repositories(
+        [RepoCandidate(name="exec", full_name="org/exec", url="https://github.com/org/exec")],
+        ExecutionPathGitHub(),
+    )
+
+    repo = triaged[0]
+    assert "install" in repo.execution_steps
+    assert "run" in repo.execution_steps
+    assert "dataset must be supplied manually" in repo.missing_prerequisites

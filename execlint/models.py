@@ -47,6 +47,9 @@ class RepoCandidate(BaseModel):
     readiness_label: Literal["strong", "moderate", "weak"] = "weak"
     readiness_summary: str = ""
     inferred_capabilities: list[RepoCapability] = Field(default_factory=list)
+    execution_steps: dict[str, list[str]] = Field(default_factory=dict)
+    missing_prerequisites: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
 
 
 class IssueFixSignal(BaseModel):

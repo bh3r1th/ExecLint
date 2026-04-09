@@ -115,6 +115,7 @@ def _audit_with_debug(
         )
 
     issue_signals_by_repo: dict[str, list[IssueFixSignal]] = {}
+    _apply_execution_path_layer(candidates)
     issue_mining_failed = False
     for repo in candidates:
         if _budget_exceeded(start):
@@ -220,6 +221,9 @@ def _debug_payload(
         "ref": execution_input.ref if execution_input else None,
         "weights_source": _weights_source(hf_status, execution_input),
         "inferred_capabilities": [getattr(capability, "value", capability) for capability in (selected_repo.inferred_capabilities if selected_repo else [])],
+        "execution_steps": selected_repo.execution_steps if selected_repo else {},
+        "missing_prerequisites": selected_repo.missing_prerequisites if selected_repo else [],
+        "execution_gaps": selected_repo.gaps if selected_repo else [],
         "discovered_repo_count": len(discovered),
         "candidate_count": len(candidates),
         "selected_repo_name": selected_repo.full_name if selected_repo else "none",
@@ -230,7 +234,18 @@ def _debug_payload(
         "top_blocker_categories": [name for name, _ in category_counter.most_common(3)],
         "hf_summary": _hf_debug_summary(hf_status),
         "partial_source_failures": list(dict.fromkeys(source_failures)),
-    }
+}
+
+
+def _apply_execution_path_layer(candidates: list[RepoCandidate]) -> None:
+    for index, candidate in enumerate(candidates):
+        candidates[index] = candidate.model_copy(
+            update={
+                "execution_steps": candidate.execution_steps,
+                "missing_prerequisites": candidate.missing_prerequisites,
+                "gaps": candidate.gaps,
+            }
+        )
 
 
 def _budget_exceeded(started_at: float) -> bool:
