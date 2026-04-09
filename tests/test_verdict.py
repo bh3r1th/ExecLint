@@ -645,3 +645,56 @@ def test_generic_fix_filler_is_not_emitted() -> None:
     )
 
     assert report.fix == "No clear fix found"
+
+
+def test_execution_path_commands_are_exposed_in_report() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="strong",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["train.py", "eval.py"],
+        inferred_capabilities=["inference", "evaluation"],
+        execution_steps={
+            "install": ["pip install -r requirements.txt"],
+            "run": ["python train.py"],
+            "evaluate": ["python eval.py"],
+        },
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="found", model_id="org/model"),
+    )
+
+    assert report.execution_path == "install: pip install -r requirements.txt; run: python train.py; evaluate: python eval.py"
+    assert report.gaps == "None identified"
+    assert report.tthw == "Level 1"
+
+
+def test_missing_execution_path_surfaces_clear_gap_text() -> None:
+    repo = RepoCandidate(
+        name="demo",
+        full_name="org/demo",
+        url="https://github.com/org/demo",
+        readiness_label="moderate",
+        has_readme=True,
+        setup_signals=["requirements.txt"],
+        entrypoint_signals=["train.py"],
+        inferred_capabilities=["training"],
+        execution_steps={},
+        gaps=["install path ambiguous", "no clear run command"],
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/demo": []},
+        hf_status=HFModelStatus(status="unknown"),
+    )
+
+    assert report.execution_path == "No extracted execution commands"
+    assert report.gaps == "install path ambiguous; no clear run command"
+    assert report.tthw == "Level 3"

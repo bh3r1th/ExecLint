@@ -49,6 +49,8 @@ def audit(
     typer.echo(f"- Verdict: {report.verdict}")
     typer.echo(f"- Time-to-Hello-World (TTHW): {report.tthw} — {TTHW_MEANINGS[report.tthw]}")
     typer.echo(f"- Runnable For: {report.runnable_for}")
+    typer.echo(f"- Execution Path: {report.execution_path or 'No extracted execution commands'}")
+    typer.echo(f"- Gaps: {report.gaps or 'None identified'}")
     typer.echo(f"- Not Clearly Supported: {report.not_clearly_supported or 'None identified'}")
     typer.echo(f"- What Breaks: {report.what_breaks}")
     typer.echo(f"- Fix (if any): {report.fix}")

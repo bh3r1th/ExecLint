@@ -19,6 +19,9 @@ MEANINGFUL_CAPABILITIES = (
     RepoCapability.evaluation,
     RepoCapability.smoke_test,
 )
+EXECUTION_STEP_ORDER = ("install", "setup_data", "setup_weights", "run", "evaluate")
+
+
 def build_execution_report(
     candidates: list[RepoCandidate],
     issue_signals_by_repo: dict[str, list[IssueFixSignal]],
@@ -33,6 +36,8 @@ def build_execution_report(
             tthw="Level 4",
             best_repo="None found",
             runnable_for="unclear",
+            execution_path="No extracted execution commands",
+            gaps="No repository candidate",
             not_clearly_supported="",
             what_breaks="No repository candidate",
             fix="Unavailable: no repository data",
@@ -73,6 +78,8 @@ def build_execution_report(
         tthw=tthw,
         best_repo=best_repo.url.unicode_string(),
         runnable_for=_runnable_for_text(best_repo),
+        execution_path=_execution_path_text(best_repo),
+        gaps=_gaps_text(best_repo),
         not_clearly_supported=_not_clearly_supported_text(best_repo),
         what_breaks=_what_breaks(blockers),
         fix=_fix_summary(issue_signals, best_repo),
@@ -217,6 +224,25 @@ def _not_clearly_supported_text(repo: RepoCandidate) -> str:
     return ""
 
 
+def _execution_path_text(repo: RepoCandidate) -> str:
+    if not repo.execution_steps:
+        return "No extracted execution commands"
+
+    segments: list[str] = []
+    for step in EXECUTION_STEP_ORDER:
+        commands = repo.execution_steps.get(step, [])
+        if not commands:
+            continue
+        segments.append(f"{step}: {' | '.join(commands[:2])}")
+    return "; ".join(segments) if segments else "No extracted execution commands"
+
+
+def _gaps_text(repo: RepoCandidate) -> str:
+    if not repo.gaps:
+        return "None identified"
+    return "; ".join(repo.gaps)
+
+
 def _signal_blocker_severity(signal: IssueFixSignal) -> int:
     explicit = BLOCKER_SEVERITY_SCORE.get(signal.confidence, 1)
     text = f"{signal.blocker_category or ''} {signal.blocker}".lower()
@@ -296,9 +322,24 @@ def _pick_tthw(
     smoke_test_only = set(_normalized_capabilities(repo)) == {RepoCapability.smoke_test}
     credible_path = _has_credible_runnable_path(repo, hf_status, issue_signals, weights_url=weights_url)
     weights_gap = _repo_requires_external_weights(repo, issue_signals) and hf_status.status != "found" and not weights_url
+    step_map = repo.execution_steps or {}
+    has_commands = any(step_map.get(step) for step in EXECUTION_STEP_ORDER)
+    has_install_step = bool(step_map.get("install"))
+    has_run_step = bool(step_map.get("run"))
+    manual_ambiguity = any(
+        token in gap
+        for gap in repo.gaps
+        for token in ("manual", "ambiguous", "unclear", "not linked", "no clear")
+    )
 
     if not credible_path:
         return "Level 4"
+    if has_install_step and has_run_step:
+        if not manual_ambiguity and blocker_severity <= 1 and not weights_gap:
+            return "Level 1" if runtime_capabilities else "Level 2"
+        return "Level 3"
+    if manual_ambiguity:
+        return "Level 3"
     if smoke_test_only:
         return "Level 3"
     if (
