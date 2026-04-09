@@ -47,6 +47,7 @@ def build_execution_report(
 
     issue_signals = issue_signals_by_repo.get(best_repo.full_name, [])
     blockers = _repo_blockers(best_repo, issue_signals, hf_status, weights_url=weights_url)
+    evidence_items = _evidence_items(best_repo, issue_signals, hf_status, weights_url=weights_url)
     blocker_severity = max((severity for _, severity in blockers), default=0)
     runnable_score = _runnable_signal_score(best_repo)
     has_fix = _has_credible_fix(issue_signals)
@@ -81,10 +82,10 @@ def build_execution_report(
         execution_path=_execution_path_text(best_repo),
         gaps=_gaps_text(best_repo),
         not_clearly_supported=_not_clearly_supported_text(best_repo),
-        what_breaks=_what_breaks(blockers),
+        what_breaks=_what_breaks(blockers, evidence_items),
         fix=_fix_summary(issue_signals, best_repo),
         hf_status=_hf_text(hf_status),
-        technical_debt=_technical_debt(best_repo, issue_signals, hf_status, ref=ref, weights_url=weights_url),
+        technical_debt=_technical_debt(evidence_items, ref=ref, repo=best_repo),
     )
 
 
@@ -323,9 +324,10 @@ def _pick_tthw(
     credible_path = _has_credible_runnable_path(repo, hf_status, issue_signals, weights_url=weights_url)
     weights_gap = _repo_requires_external_weights(repo, issue_signals) and hf_status.status != "found" and not weights_url
     step_map = repo.execution_steps or {}
-    has_commands = any(step_map.get(step) for step in EXECUTION_STEP_ORDER)
     has_install_step = bool(step_map.get("install"))
     has_run_step = bool(step_map.get("run"))
+    has_evaluate_step = bool(step_map.get("evaluate"))
+    has_credible_sequence = _has_credible_execution_sequence(repo)
     manual_ambiguity = any(
         token in gap
         for gap in repo.gaps
@@ -334,9 +336,13 @@ def _pick_tthw(
 
     if not credible_path:
         return "Level 4"
-    if has_install_step and has_run_step:
-        if not manual_ambiguity and blocker_severity <= 1 and not weights_gap:
-            return "Level 1" if runtime_capabilities else "Level 2"
+    if has_credible_sequence and has_install_step and has_run_step:
+        if blocker_severity <= 1 and not manual_ambiguity and not weights_gap:
+            return "Level 1"
+        return "Level 2"
+    if has_install_step and (has_run_step or has_evaluate_step):
+        return "Level 2"
+    if has_evaluate_step and not has_run_step:
         return "Level 3"
     if manual_ambiguity:
         return "Level 3"
@@ -434,10 +440,14 @@ def _floor_verdict_for_credible_path(verdict: str, tthw: str, credible_path: boo
 
 def _what_breaks(
     blockers: list[tuple[str, int]],
+    evidence_items: list[str],
 ) -> str:
-    if not blockers:
-        return "No concrete blocker visible"
-    return "; ".join(message for message, _ in blockers[:2])
+    concrete = [message for message, _ in blockers if message and message != "fix path unclear"]
+    if concrete:
+        return "; ".join(concrete[:2])
+    if evidence_items:
+        return "; ".join(evidence_items[:2])
+    return "No concrete blocker visible"
 
 
 def _fix_summary(issue_signals: list[IssueFixSignal], repo: RepoCandidate) -> str:
@@ -460,47 +470,26 @@ def _hf_text(status: HFModelStatus) -> str:
 
 
 def _technical_debt(
+    evidence_items: list[str],
     repo: RepoCandidate,
-    issue_signals: list[IssueFixSignal],
-    hf_status: HFModelStatus,
     ref: str | None = None,
-    weights_url: str | None = None,
 ) -> str:
+    debt_map = {
+        "dataset must be supplied manually": "dataset bootstrap manual",
+        "checkpoint link absent": "checkpoint provenance unclear",
+        "install path ambiguous": "install path ambiguous",
+        "no clear inference/demo command": "runtime entrypoint unclear",
+        "no clear run command": "runtime entrypoint unclear",
+        "environment/cuda/version ambiguity": "environment pinning unresolved",
+    }
     debt_items: list[str] = []
-    issue_text = " ".join(
-        f"{signal.blocker_category or ''} {signal.blocker} {signal.fix or ''}".lower()
-        for signal in issue_signals
-    )
-
-    if "pin" in issue_text or "version" in issue_text:
-        debt_items.append("dependency versions unspecified")
-    if "fork" in issue_text:
-        debt_items.append("stale fork dependency")
-    if not repo.has_readme and not repo.setup_signals:
-        debt_items.append("install path ambiguous")
-    if _repo_requires_external_weights(repo, issue_signals) and hf_status.status != "found" and not weights_url:
-        debt_items.append("checkpoint provenance unclear")
-    elif weights_url:
-        debt_items.append("user-supplied weights provenance")
-    if _dataset_bootstrap_manual(issue_signals):
-        debt_items.append("dataset bootstrap manual")
+    for item in evidence_items:
+        mapped = debt_map.get(item)
+        if mapped and mapped not in debt_items:
+            debt_items.append(mapped)
     if not ref and _stale_branch_ambiguity(repo):
         debt_items.append("stale branch ambiguity")
-
-    capability_debt = _capability_debt(repo)
-    if capability_debt:
-        debt_items.append(capability_debt)
-
     return ", ".join(debt_items) if debt_items else "None identified"
-
-
-def _capability_debt(repo: RepoCandidate) -> str | None:
-    capabilities = set(_normalized_capabilities(repo))
-    if capabilities == {RepoCapability.unclear}:
-        return "repo capability unclear"
-    if capabilities == {RepoCapability.smoke_test}:
-        return "repo appears limited to smoke tests"
-    return None
 
 
 def _repo_blockers(
@@ -527,8 +516,17 @@ def _repo_blockers(
     elif _repo_stale(repo):
         blockers.append(("stale or archived repo", 1))
 
-    if not repo.has_readme and not repo.setup_signals:
-        blockers.append(("no clear install path", 2))
+    evidence_items = _evidence_items(repo, issue_signals, hf_status, weights_url=weights_url)
+    severity_by_item = {
+        "dataset must be supplied manually": 2,
+        "checkpoint link absent": 2,
+        "install path ambiguous": 2,
+        "no clear inference/demo command": 2,
+        "no clear run command": 2,
+        "environment/cuda/version ambiguity": 2,
+    }
+    for item in evidence_items:
+        blockers.append((item, severity_by_item.get(item, 1)))
 
     if not credible_path:
         if meaningful_capabilities:
@@ -539,15 +537,6 @@ def _repo_blockers(
                 blockers.append(("no clear runnable entrypoint", 2))
         else:
             blockers.append(("no obvious runnable entrypoint for any meaningful capability", 3))
-
-    if _repo_requires_external_weights(repo, issue_signals) and hf_status.status != "found" and not weights_url:
-        blockers.append(("external checkpoints/weights not linked", 2))
-
-    if _dataset_bootstrap_manual(issue_signals):
-        blockers.append(("dataset must be supplied manually", 2))
-
-    if _environment_ambiguity(issue_signals):
-        blockers.append(("environment/CUDA/version ambiguity", 2))
 
     if blockers and not _has_credible_fix(issue_signals) and any(severity >= 3 for _, severity in blockers):
         blockers.append(("fix path unclear", 1))
@@ -591,3 +580,46 @@ def _weights_are_primary_blocker(issue_signals: list[IssueFixSignal]) -> bool:
         if "weight" not in text and "checkpoint" not in text:
             return False
     return True
+
+
+def _has_credible_execution_sequence(repo: RepoCandidate) -> bool:
+    steps = repo.execution_steps or {}
+    has_install = bool(steps.get("install"))
+    has_run = bool(steps.get("run"))
+    has_evaluate = bool(steps.get("evaluate"))
+    return has_install and (has_run or has_evaluate)
+
+
+def _evidence_items(
+    repo: RepoCandidate,
+    issue_signals: list[IssueFixSignal],
+    hf_status: HFModelStatus,
+    weights_url: str | None = None,
+) -> list[str]:
+    items: list[str] = []
+    gap_text = " ".join(gap.lower() for gap in repo.gaps)
+    issue_text = " ".join(f"{signal.blocker_category or ''} {signal.blocker}".lower() for signal in issue_signals)
+    combined = f"{gap_text} {issue_text}".strip()
+
+    if "dataset" in combined and any(token in combined for token in ("manual", "supply", "download", "bootstrap")):
+        items.append("dataset must be supplied manually")
+    if _repo_requires_external_weights(repo, issue_signals) and hf_status.status != "found" and not weights_url:
+        items.append("checkpoint link absent")
+    if (not repo.has_readme and not repo.setup_signals) or any(
+        token in gap_text for token in ("install path ambiguous", "install ambiguous", "no clear install")
+    ):
+        items.append("install path ambiguous")
+    if any(token in gap_text for token in ("no clear run command", "run command missing")):
+        items.append("no clear run command")
+    if any(token in gap_text for token in ("no clear inference", "no clear demo", "inference/demo")):
+        items.append("no clear inference/demo command")
+    if _environment_ambiguity(issue_signals) or any(
+        token in combined for token in ("cuda mismatch", "environment mismatch", "version mismatch", "dependency mismatch")
+    ):
+        items.append("environment/cuda/version ambiguity")
+
+    compact: list[str] = []
+    for item in items:
+        if item not in compact:
+            compact.append(item)
+    return compact
