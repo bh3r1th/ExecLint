@@ -770,3 +770,29 @@ def test_generic_filler_not_emitted_when_execution_sequence_exists() -> None:
     assert "No concrete blocker visible" not in report.what_breaks
     assert "no obvious runnable entrypoint" not in report.what_breaks
     assert report.what_breaks == "no clear run command"
+
+
+def test_tthw_escalates_to_level_4_for_heavy_setup_signals() -> None:
+    repo = RepoCandidate(
+        name="af2",
+        full_name="org/af2",
+        url="https://github.com/org/af2",
+        readiness_label="strong",
+        has_readme=True,
+        setup_signals=["scripts/download_database.sh", "docker-compose.yml"],
+        entrypoint_signals=["run_alphafold.py"],
+        inferred_capabilities=["inference"],
+        execution_steps={
+            "install": ["docker build -t af2 ."],
+            "setup_data": ["bash scripts/download_database.sh"],
+            "run": ["python run_alphafold.py --db-size 2TB"],
+        },
+    )
+
+    report = build_execution_report(
+        candidates=[repo],
+        issue_signals_by_repo={"org/af2": []},
+        hf_status=HFModelStatus(status="found", model_id="org/model"),
+    )
+
+    assert report.tthw == "Level 4"

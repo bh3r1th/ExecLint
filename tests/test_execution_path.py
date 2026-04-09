@@ -61,3 +61,48 @@ def test_detects_no_clear_run_command_gap() -> None:
     )
 
     assert "no clear run command" in analysis.gaps
+
+
+def test_filters_non_command_lines_and_keeps_only_high_signal_commands() -> None:
+    analysis = analyze_execution_path(
+        readme_text="""
+        ## Install
+        Please install dependencies and then continue.
+        pip install -r requirements.txt
+        Visit https://example.com/docs for details.
+        python run.py --config configs/demo.yaml
+        Notes: this may take a while.
+        """,
+        paths=[],
+    )
+
+    flattened = " ".join(command for commands in analysis.execution_steps.values() for command in commands)
+    assert "https://example.com/docs" not in flattened
+    assert "notes:" not in flattened.lower()
+    assert analysis.execution_steps["install"] == ["pip install -r requirements.txt"]
+    assert analysis.execution_steps["run"] == ["python run.py --config configs/demo.yaml"]
+
+
+def test_long_readme_command_block_gets_summarized() -> None:
+    long_block = "\n".join([f"python step_{idx}.py" for idx in range(30)])
+    analysis = analyze_execution_path(readme_text=long_block, paths=[])
+
+    assert analysis.execution_steps["run"] == ["python step_0.py | python step_1.py"]
+
+
+def test_alphafold_like_readme_produces_short_step_summary() -> None:
+    analysis = analyze_execution_path(
+        readme_text="""
+        # AlphaFold style setup
+        docker build -t af2 .
+        bash scripts/download_data.sh
+        bash scripts/download_weights.sh
+        python run_alphafold.py --fasta_path target.fasta
+        python eval.py --predictions out/
+        python extra_debug.py
+        """,
+        paths=[],
+    )
+
+    assert list(analysis.execution_steps) == ["install", "setup_data", "setup_weights", "run", "evaluate"]
+    assert analysis.execution_steps["run"] == ["python run_alphafold.py --fasta_path target.fasta | python extra_debug.py"]

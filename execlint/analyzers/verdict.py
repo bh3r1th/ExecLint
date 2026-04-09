@@ -20,6 +20,7 @@ MEANINGFUL_CAPABILITIES = (
     RepoCapability.smoke_test,
 )
 EXECUTION_STEP_ORDER = ("install", "setup_data", "setup_weights", "run", "evaluate")
+HEAVY_SETUP_TOKENS = ("docker", "download", "database", "tb", "gb")
 
 
 def build_execution_report(
@@ -61,7 +62,7 @@ def build_execution_report(
         runnable_score=runnable_score,
         weights_url=weights_url,
     )
-    if tthw == "Level 4" and _has_declared_runnable_capability(best_repo):
+    if tthw == "Level 4" and _has_declared_runnable_capability(best_repo) and not _requires_heavy_setup(best_repo, issue_signals):
         tthw = "Level 3"
     verdict = _pick_verdict(tthw)
     verdict, tthw = _apply_caution_overrides(
@@ -318,6 +319,9 @@ def _pick_tthw(
     runnable_score: int,
     weights_url: str | None = None,
 ) -> str:
+    if _requires_heavy_setup(repo, issue_signals):
+        return "Level 4"
+
     meaningful_capabilities = _meaningful_capabilities(repo)
     runtime_capabilities = set(meaningful_capabilities) & {RepoCapability.demo, RepoCapability.inference}
     smoke_test_only = set(_normalized_capabilities(repo)) == {RepoCapability.smoke_test}
@@ -366,6 +370,24 @@ def _pick_tthw(
     if has_fix or runnable_score >= 2:
         return "Level 3"
     return "Level 4"
+
+
+def _requires_heavy_setup(repo: RepoCandidate, issue_signals: list[IssueFixSignal]) -> bool:
+    setup_and_entrypoints = " ".join([*repo.setup_signals, *repo.entrypoint_signals]).lower()
+    execution_text = " ".join(
+        command.lower()
+        for commands in (repo.execution_steps or {}).values()
+        for command in commands
+    )
+    issue_text = " ".join(f"{signal.blocker_category or ''} {signal.blocker}".lower() for signal in issue_signals)
+    gap_text = " ".join(gap.lower() for gap in repo.gaps)
+    combined = f"{setup_and_entrypoints} {execution_text} {issue_text} {gap_text}"
+
+    if any(token in combined for token in HEAVY_SETUP_TOKENS):
+        return True
+    if "dataset" in combined and any(token in combined for token in ("script", "setup", "bootstrap", "prepare")):
+        return True
+    return False
 
 
 def _has_credible_runnable_path(
@@ -429,11 +451,11 @@ def _apply_caution_overrides(
     # Diagnostic note: this function is a "verdict floor" guard. If a credible runnable
     # path exists, verdict must never remain NO-GO; Level 3 is the floor.
     credible_path = _has_credible_runnable_path(repo, hf_status, issue_signals, weights_url=weights_url)
-    return _floor_verdict_for_credible_path(verdict, tthw, credible_path)
+    return _floor_verdict_for_credible_path(verdict, tthw, credible_path, _requires_heavy_setup(repo, issue_signals))
 
 
-def _floor_verdict_for_credible_path(verdict: str, tthw: str, credible_path: bool) -> tuple[str, str]:
-    if verdict == "NO-GO" and credible_path:
+def _floor_verdict_for_credible_path(verdict: str, tthw: str, credible_path: bool, heavy_setup: bool = False) -> tuple[str, str]:
+    if verdict == "NO-GO" and credible_path and not heavy_setup:
         return "CAUTION", "Level 3"
     return verdict, tthw
 
