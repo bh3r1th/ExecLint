@@ -1,6 +1,7 @@
 # ExecLint
 
 ExecLint is a CLI tool that checks whether a research paper’s code is actually runnable and shows the execution path, gaps, and setup effort.
+Verdict is a heuristic signal. Always rely on Execution Path and Gaps.
 
 ---
 
