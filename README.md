@@ -1,24 +1,22 @@
 # ExecLint
 
-ExecLint is a CLI tool that checks whether a research paper’s code is actually runnable and shows the execution path, gaps, and setup effort.
+ExecLint is a CLI tool that shows how to run a paper’s code, what’s missing, and how much effort it takes.
 Verdict is a heuristic signal. Always rely on Execution Path and Gaps.
 
 ---
 
 ## What It Does
 
-- Takes arXiv URL + GitHub repo  
-- Extracts execution path (install, run, evaluate)  
-- Identifies gaps (missing data, weights, unclear steps)  
-- Estimates Time-to-Hello-World (TTHW)  
-- Produces a practical execution report  
+- Extracts execution path (install, run, evaluate)
+- Identifies missing pieces (data, weights, setup)
+- Estimates Time-to-Hello-World (TTHW)
 
 ---
 
 ## Why It Exists
 
-Many paper repos are not directly runnable.  
-ExecLint shows execution reality upfront so you don’t waste time.
+Paper repos often look runnable but fail at execution.
+ExecLint shows the real path and gaps before you waste time.
 
 ---
 
@@ -29,6 +27,12 @@ pip install -e .
 ```
 
 ---
+## Input Requirements
+
+- arXiv URL (paper)
+- GitHub repository URL (code)
+
+ExecLint does not search for repos automatically.
 
 ## Usage
 
@@ -54,37 +58,35 @@ python -m execlint.cli <arxiv_url> --repo <github_repo> --debug
 
 ## Output Explained
 
-- Execution Path: key commands to try  
-- Runnable For: what repo supports  
-- Gaps: missing pieces  
-- What Breaks: real blockers  
-- Technical Debt: friction points  
-- Not Clearly Supported: unclear capabilities  
-- HF Status: model availability  
-- Verdict: GO / CAUTION / NO-GO  
-- TTHW:
-
-  - Level 1: plug-and-play  
-  - Level 2: minor setup  
-  - Level 3: significant setup  
-  - Level 4: heavy infra  
+- Execution Path: actual commands extracted from repo
+- Gaps: what you must supply manually (data, weights, env)
+- What Breaks: concrete execution blockers only
+- Verdict: rough signal (not reliable alone)
+- TTHW: effort required to get first result 
 
 ---
 
 ## Example Output
 
-Execution Path: install: pip install loralib; run: python train.py  
-Gaps: env version unclear  
-Verdict: CAUTION  
-TTHW: Level 2  
+Execution Path:
+install: pip install loralib
+run: python examples/.../run_clm.py
+
+Gaps:
+env version unclear
+
+Verdict:
+CAUTION
+
+TTHW:
+Level 2 — minor setup required 
 
 ---
 
 ## Limitations
 
-- heuristic-based  
-- may miss edge cases  
-- does not guarantee reproducibility  
+- capability labels may be imprecise
+- verdict may be conservative
 
 ---
 
