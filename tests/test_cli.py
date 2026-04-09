@@ -163,8 +163,8 @@ def test_cli_accepts_optional_fields(monkeypatch) -> None:
 
     execution_input = captured["execution_input"]
     assert isinstance(execution_input, ExecutionInput)
-    assert execution_input.repo_url == "https://github.com/org/demo"
-    assert execution_input.weights_url == "https://huggingface.co/org/model"
+    assert str(execution_input.repo_url) == "https://github.com/org/demo"
+    assert str(execution_input.weights_url) == "https://huggingface.co/org/model"
     assert execution_input.ref == "v1.2.3"
 
 

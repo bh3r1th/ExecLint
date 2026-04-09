@@ -88,7 +88,7 @@ def test_fetch_paper_extracts_title_authors_abstract_and_github_link(monkeypatch
     assert paper.title == "ExecLint: Surgical Debug Signals for Papers"
     assert paper.authors == ["Alice Smith", "Bob Jones"]
     assert paper.abstract == "We expose paper-level debug signals without parsing PDFs."
-    assert paper.code_url == "https://github.com/example/execlint"
+    assert str(paper.code_url) == "https://github.com/example/execlint"
     assert paper.code_url_source == "arxiv_page"
 
 
