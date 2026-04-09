@@ -12,6 +12,7 @@ from execlint.models import ArxivPaper
 ARXIV_ABS_URL = "https://arxiv.org/abs/"
 GITHUB_HOSTS = {"github.com", "www.github.com"}
 CODE_LINK_TERMS = ("code", "github", "implementation", "official", "repo", "repository", "project")
+DEFAULT_USER_AGENT = "ExecLint/0.1 (+https://github.com/)"
 
 
 def normalize_arxiv_input(arxiv_input: str) -> tuple[str, str]:
@@ -62,12 +63,86 @@ def normalize_arxiv_input(arxiv_input: str) -> tuple[str, str]:
 class ArxivClient:
     def __init__(self, timeout: float = REQUEST_TIMEOUT_SECONDS) -> None:
         self._timeout = timeout
-        self._client = httpx.Client(timeout=timeout, follow_redirects=True)
+        self._client = httpx.Client(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={"User-Agent": DEFAULT_USER_AGENT},
+        )
 
-    def fetch_paper(self, arxiv_id: str, url: str) -> ArxivPaper:
-        response = self._client.get(f"{ARXIV_ABS_URL}{arxiv_id}", timeout=self._timeout)
-        response.raise_for_status()
+    def fetch_paper(self, arxiv_id: str, url: str, original_input: str | None = None) -> ArxivPaper:
+        original = original_input or url
+        request_url = f"{ARXIV_ABS_URL}{arxiv_id}"
+        try:
+            response = self._client.get(request_url)
+            response.raise_for_status()
+        except Exception as exc:
+            raise ValueError(
+                _format_fetch_error(
+                    original_input=original,
+                    normalized_arxiv_id=arxiv_id,
+                    request_url=request_url,
+                    status_code=_exception_status_code(exc),
+                    root_exc=exc,
+                )
+            ) from exc
         return _parse_abs_page(arxiv_id=arxiv_id, page_url=url, html=response.text)
+
+
+def fetch_arxiv_page_debug(arxiv_input: str) -> dict[str, str | int | None]:
+    normalized_arxiv_id, request_url = normalize_arxiv_input(arxiv_input)
+    debug: dict[str, str | int | None] = {
+        "original_input": arxiv_input,
+        "normalized_arxiv_id": normalized_arxiv_id,
+        "request_url": request_url,
+        "status_code": None,
+        "final_url": None,
+        "body_preview": None,
+        "error": None,
+    }
+    try:
+        with httpx.Client(
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            follow_redirects=True,
+            headers={"User-Agent": DEFAULT_USER_AGENT},
+        ) as client:
+            response = client.get(request_url)
+            debug["status_code"] = response.status_code
+            debug["final_url"] = str(response.url)
+            debug["body_preview"] = response.text[:300]
+            response.raise_for_status()
+    except Exception as exc:
+        if debug["status_code"] is None:
+            debug["status_code"] = _exception_status_code(exc)
+        debug["error"] = f"{exc.__class__.__name__}: {exc}"
+    return debug
+
+
+def _format_fetch_error(
+    *,
+    original_input: str,
+    normalized_arxiv_id: str,
+    request_url: str,
+    status_code: int | None,
+    root_exc: Exception,
+) -> str:
+    return (
+        "Could not fetch arXiv metadata: "
+        f"original_input={original_input!r}; "
+        f"normalized_arxiv_id={normalized_arxiv_id!r}; "
+        f"request_url={request_url!r}; "
+        f"status_code={status_code!r}; "
+        f"root_exception={root_exc.__class__.__name__}: {root_exc}"
+    )
+
+
+def _exception_status_code(exc: Exception) -> int | None:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code
+    if hasattr(exc, "response") and getattr(exc, "response") is not None:
+        status_code = getattr(exc.response, "status_code", None)
+        if isinstance(status_code, int):
+            return status_code
+    return None
 
 
 def _parse_abs_page(arxiv_id: str, page_url: str, html: str) -> ArxivPaper:
