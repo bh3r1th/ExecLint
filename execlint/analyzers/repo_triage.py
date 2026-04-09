@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from execlint.analyzers.execution_path import analyze_execution_path
 from execlint.clients.github_client import GitHubClient
 from execlint.models import RepoCapability, RepoCandidate
 
@@ -28,6 +29,7 @@ def triage_repositories(
         setup_signals = _extract_setup_signals(readme or "", paths)
         entrypoints = _extract_entrypoints(paths)
         inferred_capabilities = _infer_capabilities(readme or "", paths)
+        execution_path = analyze_execution_path(readme or "", paths)
         activity_score = _activity_score(candidate.pushed_at)
         readiness_score, readiness_label = _compute_readiness(
             has_readme=bool(readme),
@@ -62,6 +64,9 @@ def triage_repositories(
                     "readiness_label": readiness_label,
                     "readiness_summary": summary,
                     "inferred_capabilities": inferred_capabilities,
+                    "execution_steps": execution_path.execution_steps,
+                    "missing_prerequisites": execution_path.missing_prerequisites,
+                    "gaps": execution_path.gaps,
                 }
             )
         )
