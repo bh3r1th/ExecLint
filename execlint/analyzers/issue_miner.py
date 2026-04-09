@@ -21,12 +21,10 @@ BLOCKER_KEYWORDS = (
     "fail",
 )
 
-BLOCKER_CATEGORY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("cuda", ("cuda", "cudnn", "nvidia", "gpu")),
-    ("missing-assets", ("checkpoint", "weights", "model file", "dataset", "asset", "missing file", "artifact")),
-    ("dependency", ("dependency", "requirements", "pip", "conda", "module")),
-    ("api-drift", ("deprecated", "deprecate", "api", "rename", "signature", "breaking change")),
-    ("environment", ("install", "import", "version", "linux", "windows", "mac", "python", "runtime")),
+NOISY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b(confused|confusing|i don'?t understand|not sure|unclear docs?)\b", re.I),
+    re.compile(r"\b(quality is bad|poor quality|results are bad|not reproducible|reproducibility issue)\b", re.I),
+    re.compile(r"\b(feels broken|seems broken|doesn'?t look right|hard to use)\b", re.I),
 )
 
 _FIX_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -75,8 +73,11 @@ def _build_signal(issue: dict) -> tuple[float, IssueFixSignal] | None:
     if not matched_keywords:
         return None
 
+    blocker_label = _extract_blocker_label(combined_lower)
+    if blocker_label is None or _is_noisy_issue(title, body, combined_lower):
+        return None
+
     probable_fix = _extract_fix_signal(combined_lower)
-    category = _pick_category(combined_lower)
 
     comments_count = int(issue.get("comments") or 0)
     reactions = issue.get("reactions") or {}
@@ -88,9 +89,9 @@ def _build_signal(issue: dict) -> tuple[float, IssueFixSignal] | None:
 
     confidence = "high" if score >= 6 else "medium" if score >= 3 else "low"
     signal = IssueFixSignal(
-        blocker=title or "Potential execution blocker",
+        blocker=blocker_label,
         issue_number=issue.get("number"),
-        blocker_category=category,
+        blocker_category=blocker_label,
         fix=probable_fix,
         confidence=confidence,
     )
@@ -140,11 +141,70 @@ def _normalize_title(title: str) -> str:
     return " ".join(cleaned.split())
 
 
-def _pick_category(text: str) -> str:
-    for category, patterns in BLOCKER_CATEGORY_PATTERNS:
-        if any(pattern in text for pattern in patterns):
-            return category
-    return "unclear"
+def _extract_blocker_label(text: str) -> str | None:
+    if _matches_install_failure(text):
+        return "install failure"
+    if _matches_missing_weights(text):
+        return "missing weights/checkpoints"
+    if _matches_missing_dataset(text):
+        return "missing dataset / manual dataset bootstrap"
+    if _matches_env_version_conflict(text):
+        return "env/version conflict"
+    if _matches_missing_run_command(text):
+        return "missing run command"
+    if _matches_runtime_api_error(text):
+        return "runtime/API error"
+    if _matches_stale_archived(text):
+        return "stale/archived repo issue"
+    return None
+
+
+def _is_noisy_issue(title: str, body: str, combined_lower: str) -> bool:
+    if _extract_blocker_label(combined_lower):
+        return False
+    joined = f"{title}\n{body}".strip()
+    return bool(joined) and any(pattern.search(joined) for pattern in NOISY_PATTERNS)
+
+
+def _matches_install_failure(text: str) -> bool:
+    return any(token in text for token in ("install", "dependency", "requirements", "pip", "conda")) and any(
+        token in text for token in ("error", "fail", "failed", "cannot", "can't")
+    )
+
+
+def _matches_missing_weights(text: str) -> bool:
+    return any(token in text for token in ("weight", "checkpoint", "model file", "artifact", "ckpt")) and any(
+        token in text for token in ("missing", "not found", "absent", "not linked", "gated")
+    )
+
+
+def _matches_missing_dataset(text: str) -> bool:
+    return any(token in text for token in ("dataset", "data")) and any(
+        token in text for token in ("missing", "manual", "manually", "bootstrap", "download", "provide")
+    )
+
+
+def _matches_env_version_conflict(text: str) -> bool:
+    return any(token in text for token in ("cuda", "python", "torch", "pytorch", "version", "dependency")) and any(
+        token in text for token in ("mismatch", "incompatible", "conflict", "unsupported")
+    )
+
+
+def _matches_missing_run_command(text: str) -> bool:
+    return any(token in text for token in ("run command", "how to run", "usage", "entrypoint", "start command")) and any(
+        token in text for token in ("missing", "absent", "unclear", "not documented", "unknown")
+    )
+
+
+def _matches_runtime_api_error(text: str) -> bool:
+    return any(
+        token in text
+        for token in ("runtime error", "traceback", "exception", "api", "importerror", "typeerror", "attributeerror", "crash", "broken")
+    )
+
+
+def _matches_stale_archived(text: str) -> bool:
+    return any(token in text for token in ("archived", "stale", "unmaintained", "no longer maintained"))
 
 
 def _extract_fix_signal(text: str) -> str | None:

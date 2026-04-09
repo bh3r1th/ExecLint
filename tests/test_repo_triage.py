@@ -205,6 +205,38 @@ def test_weak_inference_evidence_does_not_trigger_inference() -> None:
     assert "inference" not in triaged[0].inferred_capabilities
 
 
+def test_generic_generation_script_does_not_trigger_inference() -> None:
+    class GenericGenerationGitHub(DummyGitHub):
+        def get_readme(self, full_name: str) -> str | None:
+            return "Train and evaluate generated samples."
+
+        def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+            return ["train.py", "scripts/generate_samples.py", "eval.py"]
+
+    triaged, _ = triage_repositories(
+        [RepoCandidate(name="gen", full_name="org/gen", url="https://github.com/org/gen")],
+        GenericGenerationGitHub(),
+    )
+
+    assert "inference" not in triaged[0].inferred_capabilities
+
+
+def test_generic_runner_script_does_not_trigger_demo() -> None:
+    class GenericRunnerGitHub(DummyGitHub):
+        def get_readme(self, full_name: str) -> str | None:
+            return "Run training and benchmark scripts."
+
+        def get_repo_file_paths(self, full_name: str, default_branch: str = "main") -> list[str]:
+            return ["train.py", "scripts/run.py", "eval.py"]
+
+    triaged, _ = triage_repositories(
+        [RepoCandidate(name="runner", full_name="org/runner", url="https://github.com/org/runner")],
+        GenericRunnerGitHub(),
+    )
+
+    assert "demo" not in triaged[0].inferred_capabilities
+
+
 def test_training_eval_path_is_not_automatically_weak() -> None:
     class ResearchGitHub(DummyGitHub):
         def get_readme(self, full_name: str) -> str | None:

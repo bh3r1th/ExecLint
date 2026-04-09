@@ -38,6 +38,14 @@ class DummyGitHub:
                 "comments": 0,
                 "reactions": {"total_count": 0},
             },
+            {
+                "number": 11,
+                "state": "open",
+                "title": "I am confused and results are bad",
+                "body": "Not reproducible for me and docs are unclear.",
+                "comments": 4,
+                "reactions": {"total_count": 1},
+            },
         ]
 
 
@@ -57,9 +65,9 @@ def test_issue_mining_maps_blocker_categories() -> None:
     signals = mine_issue_signals(repo, DummyGitHub())
     categories = {signal.issue_number: signal.blocker_category for signal in signals}
 
-    assert categories[101] == "cuda"
-    assert categories[18] == "missing-assets"
-    assert categories[17] == "api-drift"
+    assert categories[101] == "install failure"
+    assert categories[18] == "missing weights/checkpoints"
+    assert categories[17] == "runtime/API error"
 
 
 def test_issue_mining_extracts_short_fix_signal() -> None:
@@ -75,3 +83,21 @@ def test_issue_mining_extracts_short_fix_signal() -> None:
         "use specific CUDA version",
     }
     assert by_number[101].confidence == "high"
+
+
+def test_issue_mining_filters_subjective_confusion_noise() -> None:
+    repo = RepoCandidate(name="demo", full_name="org/demo", url="https://github.com/org/demo")
+
+    signals = mine_issue_signals(repo, DummyGitHub())
+
+    assert all(signal.issue_number != 11 for signal in signals)
+
+
+def test_issue_mining_keeps_real_runtime_and_install_errors() -> None:
+    repo = RepoCandidate(name="demo", full_name="org/demo", url="https://github.com/org/demo")
+
+    signals = mine_issue_signals(repo, DummyGitHub())
+    blockers = {signal.blocker for signal in signals}
+
+    assert "install failure" in blockers
+    assert "runtime/API error" in blockers
