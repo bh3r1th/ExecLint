@@ -147,6 +147,10 @@ def _candidate_from_paper_code_url(paper: ArxivPaper) -> RepoCandidate | None:
         return None
 
     owner, name = segments[0], segments[1]
+    # Fix C2: reject path-traversal or otherwise unsafe owner/name segments
+    _SAFE_SEGMENT = re.compile(r'^[a-zA-Z0-9._-]+$')
+    if not _SAFE_SEGMENT.match(owner) or not _SAFE_SEGMENT.match(name):
+        return None
     full_name = f"{owner}/{name}"
     return RepoCandidate(
         name=name,

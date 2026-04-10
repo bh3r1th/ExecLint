@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from time import monotonic
 from typing import Any
@@ -56,6 +57,34 @@ def _audit_with_debug(
     github_client = GitHubClient()
     hf_client = HFClient()
 
+    # Fix C1: ensure HTTP clients are closed on all exit paths to prevent FD leaks
+    try:
+        return _audit_with_debug_inner(
+            arxiv_url=arxiv_url,
+            original_arxiv_input=original_arxiv_input,
+            arxiv_id=arxiv_id,
+            normalized_url=normalized_url,
+            arxiv_client=arxiv_client,
+            github_client=github_client,
+            hf_client=hf_client,
+            execution_input=execution_input,
+        )
+    finally:
+        arxiv_client.close()
+        github_client.close()
+        hf_client.close()
+
+
+def _audit_with_debug_inner(
+    arxiv_url: str,
+    original_arxiv_input: str,
+    arxiv_id: str,
+    normalized_url: str,
+    arxiv_client: ArxivClient,
+    github_client: GitHubClient,
+    hf_client: HFClient,
+    execution_input: ExecutionInput | None,
+) -> tuple[ExecutionReport, list[str], dict[str, Any]]:
     start = monotonic()
     warnings: list[str] = []
     source_failures: list[str] = []
@@ -115,7 +144,8 @@ def _audit_with_debug(
         )
 
     issue_signals_by_repo: dict[str, list[IssueFixSignal]] = {}
-    _apply_execution_path_layer(candidates)
+    # Fix H1: removed no-op _apply_execution_path_layer call (execution path
+    # analysis already runs inside triage_repositories)
     issue_mining_failed = False
     for repo in candidates:
         if _budget_exceeded(start):
@@ -237,15 +267,8 @@ def _debug_payload(
 }
 
 
-def _apply_execution_path_layer(candidates: list[RepoCandidate]) -> None:
-    for index, candidate in enumerate(candidates):
-        candidates[index] = candidate.model_copy(
-            update={
-                "execution_steps": candidate.execution_steps,
-                "missing_prerequisites": candidate.missing_prerequisites,
-                "gaps": candidate.gaps,
-            }
-        )
+# Fix H1: removed _apply_execution_path_layer (was a no-op that copied
+# fields back to themselves; execution path analysis runs in triage_repositories)
 
 
 def _budget_exceeded(started_at: float) -> bool:
@@ -285,6 +308,10 @@ def _repo_candidate_from_execution_input(execution_input: ExecutionInput) -> Rep
         raise ValueError("repo_url must point to a GitHub repository")
 
     owner, name = segments[0], segments[1]
+    # Fix C2: reject path-traversal or otherwise unsafe owner/name segments
+    _SAFE_SEGMENT = re.compile(r'^[a-zA-Z0-9._-]+$')
+    if not _SAFE_SEGMENT.match(owner) or not _SAFE_SEGMENT.match(name):
+        raise ValueError("repo_url contains invalid owner or repository name")
     full_name = f"{owner}/{name}"
     return RepoCandidate(
         name=name,

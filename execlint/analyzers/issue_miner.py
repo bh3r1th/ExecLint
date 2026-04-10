@@ -160,8 +160,9 @@ def _extract_blocker_label(text: str) -> str | None:
 
 
 def _is_noisy_issue(title: str, body: str, combined_lower: str) -> bool:
-    if _extract_blocker_label(combined_lower):
-        return False
+    # Fix H5: removed early return that bypassed noise filter for categorizable
+    # issues — subjective issues containing blocker keywords should still be
+    # filtered when they match noise patterns.
     joined = f"{title}\n{body}".strip()
     return bool(joined) and any(pattern.search(joined) for pattern in NOISY_PATTERNS)
 

@@ -11,6 +11,10 @@ class HFClient:
         self._timeout = timeout
         self._client = httpx.Client(base_url=HF_API_BASE, timeout=timeout)
 
+    # Fix C1: close underlying httpx.Client to prevent resource/FD leaks
+    def close(self) -> None:
+        self._client.close()
+
     def search_models(self, query: str, limit: int = 5) -> list[dict]:
         response = self._client.get("/models", params={"search": query, "limit": limit}, timeout=self._timeout)
         if response.status_code >= 500:

@@ -69,6 +69,10 @@ class ArxivClient:
             headers={"User-Agent": DEFAULT_USER_AGENT},
         )
 
+    # Fix C1: close underlying httpx.Client to prevent resource/FD leaks
+    def close(self) -> None:
+        self._client.close()
+
     def fetch_paper(self, arxiv_id: str, url: str, original_input: str | None = None) -> ArxivPaper:
         original = original_input or url
         request_url = f"{ARXIV_ABS_URL}{arxiv_id}"

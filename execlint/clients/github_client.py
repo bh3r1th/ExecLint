@@ -14,6 +14,15 @@ from execlint.config import (
 from execlint.models import RepoCandidate
 
 
+# Fix H4: prevent GITHUB_TOKEN from leaking in httpx exception messages
+def _safe_raise_for_status(response: httpx.Response) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        sanitized_msg = f"GitHub API error: {response.status_code} for {response.request.method} {response.request.url}"
+        raise httpx.HTTPStatusError(sanitized_msg, request=response.request, response=response) from None
+
+
 class GitHubClient:
     def __init__(self, timeout: float = REQUEST_TIMEOUT_SECONDS) -> None:
         headers = {"Accept": "application/vnd.github+json, application/vnd.github.squirrel-girl-preview+json"}
@@ -22,6 +31,10 @@ class GitHubClient:
             headers["Authorization"] = f"Bearer {token}"
         self._timeout = timeout
         self._client = httpx.Client(base_url=GITHUB_API_BASE, headers=headers, timeout=timeout)
+
+    # Fix C1: close underlying httpx.Client to prevent resource/FD leaks
+    def close(self) -> None:
+        self._client.close()
 
     def search_repositories(
         self,
@@ -35,7 +48,7 @@ class GitHubClient:
             params={"q": query, "sort": "stars", "order": "desc", "per_page": per_page},
             timeout=self._timeout,
         )
-        response.raise_for_status()
+        _safe_raise_for_status(response)
         items = response.json().get("items", [])
         results: list[RepoCandidate] = []
         for item in items[:max_results_inspected]:
@@ -63,7 +76,7 @@ class GitHubClient:
         response = self._client.get(f"/repos/{full_name}/readme", timeout=self._timeout)
         if response.status_code == 404:
             return None
-        response.raise_for_status()
+        _safe_raise_for_status(response)
         data = response.json()
         content = data.get("content", "")
         if not content:
@@ -90,7 +103,7 @@ class GitHubClient:
             )
         if response.status_code in (403, 404):
             return []
-        response.raise_for_status()
+        _safe_raise_for_status(response)
         tree = response.json().get("tree", [])
         return [item.get("path", "") for item in tree if item.get("path")]
 
@@ -109,7 +122,7 @@ class GitHubClient:
         )
         if response.status_code == 404:
             return []
-        response.raise_for_status()
+        _safe_raise_for_status(response)
         issues = [issue for issue in response.json() if "pull_request" not in issue]
         return issues[: max(1, min(limit, 10))]
 
@@ -121,5 +134,5 @@ class GitHubClient:
         )
         if response.status_code == 404:
             return []
-        response.raise_for_status()
+        _safe_raise_for_status(response)
         return [issue for issue in response.json() if "pull_request" not in issue]

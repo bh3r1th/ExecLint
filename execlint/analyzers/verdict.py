@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from execlint.models import ExecutionReport, HFModelStatus, IssueFixSignal, RepoCapability, RepoCandidate
 
 BLOCKER_SEVERITY_SCORE = {"low": 1, "medium": 2, "high": 3}
@@ -20,7 +22,11 @@ MEANINGFUL_CAPABILITIES = (
     RepoCapability.smoke_test,
 )
 EXECUTION_STEP_ORDER = ("install", "setup_data", "setup_weights", "run", "evaluate")
-HEAVY_SETUP_TOKENS = ("docker", "download", "database", "tb", "gb")
+# Fix M2: use word-boundary regex for short tokens to avoid false positives
+# (e.g. "tb" matching "notable", "gb" matching "debugging")
+_HEAVY_SETUP_PATTERN = re.compile(
+    r"\b(?:docker|download|database)\b|\b\d*\s*[tg]b\b", re.IGNORECASE
+)
 
 
 def build_execution_report(
@@ -383,7 +389,8 @@ def _requires_heavy_setup(repo: RepoCandidate, issue_signals: list[IssueFixSigna
     gap_text = " ".join(gap.lower() for gap in repo.gaps)
     combined = f"{setup_and_entrypoints} {execution_text} {issue_text} {gap_text}"
 
-    if any(token in combined for token in HEAVY_SETUP_TOKENS):
+    # Fix M2: use regex instead of plain substring match
+    if _HEAVY_SETUP_PATTERN.search(combined):
         return True
     if "dataset" in combined and any(token in combined for token in ("script", "setup", "bootstrap", "prepare")):
         return True
