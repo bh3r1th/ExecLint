@@ -16,9 +16,9 @@ def test_orchestrator_continues_when_github_discovery_fails(monkeypatch) -> None
 
     report, warnings = audit_arxiv_url("https://arxiv.org/abs/1234.5678")
 
-    assert report.best_repo == "None found"
-    assert report.what_breaks == "Repository discovery unavailable"
-    assert report.fix == "Unavailable: GitHub discovery failed"
+    assert report.repo_url == "None found"
+    assert [gap.label for gap in report.gaps] == ["No repository candidate"]
+    assert report.warnings == warnings
     assert any("GitHub repository discovery unavailable" in warning for warning in warnings)
 
 
@@ -37,7 +37,7 @@ def test_orchestrator_skips_hf_when_no_repo_candidates(monkeypatch) -> None:
 
     report, _ = audit_arxiv_url("https://arxiv.org/abs/2401.00001")
 
-    assert report.hf_status == "Hugging Face status unclear"
+    assert [gap.label for gap in report.gaps] == ["No repository candidate"]
 
 
 def test_orchestrator_returns_unknown_hf_on_hf_failure(monkeypatch) -> None:
@@ -65,7 +65,7 @@ def test_orchestrator_returns_unknown_hf_on_hf_failure(monkeypatch) -> None:
 
     report, warnings = audit_arxiv_url("https://arxiv.org/abs/2401.00001")
 
-    assert report.hf_status == "Hugging Face status unavailable"
+    assert report.warnings == warnings
     assert any("Hugging Face lookup unavailable" in warning for warning in warnings)
 
 
@@ -87,7 +87,7 @@ def test_debug_payload_remains_compact_on_partial_results(monkeypatch) -> None:
     assert debug["paper_code_url_source"] == "none"
     assert debug["selected_repo_name"] == "none"
     assert debug["selected_repo_readiness"] == "n/a"
-    assert debug["selected_repo_blocker_severity"] == "low"
+    assert debug["selected_repo_blocker_severity"] == "high"
     assert debug["hf_summary"] in {"unclear", "missing", "found", "gated"}
 
 
@@ -169,7 +169,7 @@ def test_orchestrator_bypasses_repo_discovery_when_repo_url_provided(monkeypatch
         )
     )
 
-    assert report.best_repo == "https://github.com/org/demo"
+    assert report.repo_url == "https://github.com/org/demo"
     assert debug["candidate_count"] == 1
     assert debug["selected_repo_name"] == "org/demo"
     assert debug["ref"] == "main"
@@ -203,8 +203,8 @@ def test_orchestrator_uses_provided_weights_and_preserves_repo_url(monkeypatch) 
         )
     )
 
-    assert report.best_repo == "https://github.com/org/demo"
-    assert report.hf_status == "User-provided weights"
+    assert report.repo_url == "https://github.com/org/demo"
+    assert report.gaps == []
     assert debug["weights_source"] == "provided"
     assert isinstance(debug["inferred_capabilities"], list)
 

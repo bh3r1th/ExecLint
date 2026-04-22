@@ -124,11 +124,10 @@ def _audit_with_debug_inner(
 
     if not candidates:
         hf_status = HFModelStatus(status="unknown", notes="Skipped due to missing repository candidates")
-        report = build_execution_report(candidates=[], hf_status=hf_status)
+        report = build_execution_report(candidates=[], hf_status=hf_status, paper_title=paper.title)
+        report.warnings = list(dict.fromkeys(warnings))
         if "github_discovery" in source_failures:
-            report.what_breaks = "Repository discovery unavailable"
-            report.fix = "Unavailable: GitHub discovery failed"
-            report.technical_debt = "Unknown due to unavailable repository data"
+            report.warnings = list(dict.fromkeys(warnings))
         return report, warnings, _debug_payload(
             paper=paper,
             discovered=discovered,
@@ -161,17 +160,19 @@ def _audit_with_debug_inner(
         hf_status=hf_status,
         ref=execution_input.ref if execution_input else None,
         weights_url=execution_input.weights_url.unicode_string() if execution_input and execution_input.weights_url else None,
+        paper_title=paper.title,
     )
     _apply_partial_result_wording(report=report, source_failures=source_failures)
+    report.warnings = list(dict.fromkeys(warnings))
     if execution_input is not None:
-        report.best_repo = execution_input.repo_url.unicode_string()
+        report.repo_url = execution_input.repo_url.unicode_string()
     return report, warnings, _debug_payload(
         paper=paper,
         discovered=discovered,
         candidates=candidates,
         hf_status=hf_status,
         source_failures=source_failures,
-        selected_repo_url=report.best_repo,
+        selected_repo_url=report.repo_url,
         execution_input=execution_input,
         report=report,
     )
@@ -191,9 +192,7 @@ def _debug_payload(
     if selected_repo_url:
         selected_repo = next((repo for repo in candidates if repo.url.unicode_string() == selected_repo_url), None)
 
-    blocker_severity = 0
-    if report and report.what_breaks and report.what_breaks != "No concrete blocker visible":
-        blocker_severity = _report_breaker_severity(report.what_breaks)
+    blocker_severity = _gap_severity(report.gaps if report else [])
 
     return {
         "paper_title": paper.title,
@@ -239,7 +238,7 @@ def _apply_partial_result_wording(
 ) -> None:
     failures = set(source_failures)
     if "hf_unavailable" in failures:
-        report.hf_status = "Hugging Face status unavailable"
+        report.warnings.append(PARTIAL_FAILURE_WARNINGS["hf_unavailable"])
 
 
 def _repo_candidate_from_execution_input(execution_input: ExecutionInput) -> RepoCandidate:
@@ -276,24 +275,19 @@ def _weights_source(hf_status: HFModelStatus, execution_input: ExecutionInput | 
     return "none"
 
 
-def _report_breaker_severity(what_breaks: str) -> int:
-    text = what_breaks.lower()
-    if any(token in text for token in ("no obvious runnable entrypoint", "no repository candidate")):
+def _gap_severity(gaps: list[Any]) -> int:
+    labels = " ".join(getattr(gap, "label", str(gap)).lower() for gap in gaps)
+    if "no repository candidate" in labels:
         return 3
     if any(
-        token in text
+        token in labels
         for token in (
-            "checkpoint link absent",
+            "weights/checkpoints not linked",
             "install path ambiguous",
             "dataset must be supplied manually",
-            "environment/cuda/version ambiguity",
-            "no clear runnable entrypoint",
-            "no clear inference/demo entrypoint",
-            "no clear inference/demo command",
+            "env version unclear",
             "no clear run command",
         )
     ):
         return 2
-    if any(token in text for token in ("stale or archived repo", "fix path unclear", "repository discovery unavailable")):
-        return 1
     return 0

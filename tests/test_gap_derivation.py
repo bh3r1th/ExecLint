@@ -4,6 +4,10 @@ from execlint.analyzers.verdict import build_execution_report
 from execlint.models import HFModelStatus, RepoCandidate
 
 
+def _gap_labels(report) -> list[str]:
+    return [gap.label for gap in report.gaps]
+
+
 def test_best_repo_selection_still_prefers_stronger_runnable_repo() -> None:
     weak_repo = RepoCandidate(
         name="weak",
@@ -31,39 +35,23 @@ def test_best_repo_selection_still_prefers_stronger_runnable_repo() -> None:
     report = build_execution_report(
         candidates=[weak_repo, strong_repo],
         hf_status=HFModelStatus(status="found", model_id="org/model"),
+        paper_title="Demo Paper",
     )
 
-    assert report.best_repo == "https://github.com/org/strong"
+    assert report.paper_title == "Demo Paper"
+    assert report.repo_url == "https://github.com/org/strong"
 
 
 def test_no_repo_report_surfaces_repository_gap() -> None:
     report = build_execution_report(candidates=[], hf_status=HFModelStatus(status="not_found"))
 
-    assert report.best_repo == "None found"
-    assert report.gaps == "No repository candidate"
-    assert report.what_breaks == "No repository candidate"
-    assert report.fix == "Unavailable: no repository data"
-    assert report.hf_status == "Hugging Face model missing"
+    assert report.repo_url == "None found"
+    assert _gap_labels(report) == ["No repository candidate"]
+    assert report.gaps[0].category == "run"
+    assert report.gaps[0].evidence == "No GitHub repository candidate was available to inspect"
 
 
-def test_hf_unknown_wording_is_unclear_not_missing() -> None:
-    repo = RepoCandidate(
-        name="demo",
-        full_name="org/demo",
-        url="https://github.com/org/demo",
-        readiness_label="strong",
-        has_readme=True,
-        setup_signals=["requirements.txt", "pyproject.toml"],
-        entrypoint_signals=["run.py"],
-    )
-
-    report = build_execution_report(candidates=[repo], hf_status=HFModelStatus(status="unknown"))
-
-    assert report.hf_status == "Hugging Face status unclear"
-    assert "checkpoint provenance unclear" not in report.technical_debt
-
-
-def test_provided_weights_suppresses_checkpoint_debt() -> None:
+def test_provided_weights_suppresses_checkpoint_gap() -> None:
     repo = RepoCandidate(
         name="demo",
         full_name="org/demo",
@@ -81,31 +69,10 @@ def test_provided_weights_suppresses_checkpoint_debt() -> None:
         weights_url="https://weights.example/model.bin",
     )
 
-    assert report.hf_status == "User-provided weights"
-    assert report.what_breaks == "No concrete blocker visible"
-    assert "checkpoint provenance unclear" not in report.technical_debt
+    assert "weights/checkpoints not linked" not in _gap_labels(report)
 
 
-def test_research_workflow_support_gap_is_specific() -> None:
-    repo = RepoCandidate(
-        name="research",
-        full_name="org/research",
-        url="https://github.com/org/research",
-        readiness_label="moderate",
-        has_readme=True,
-        setup_signals=["requirements.txt", "pyproject.toml"],
-        entrypoint_signals=["train.py", "scripts/"],
-        inferred_capabilities=["training", "evaluation"],
-    )
-
-    report = build_execution_report(candidates=[repo], hf_status=HFModelStatus(status="unknown"))
-
-    assert report.runnable_for == "training, evaluation"
-    assert report.what_breaks == "No concrete blocker visible"
-    assert report.not_clearly_supported == "demo, inference"
-
-
-def test_blockers_derive_from_gaps_and_repo_facts() -> None:
+def test_install_gap_has_structured_category_and_evidence() -> None:
     repo = RepoCandidate(
         name="demo",
         full_name="org/demo",
@@ -119,11 +86,12 @@ def test_blockers_derive_from_gaps_and_repo_facts() -> None:
 
     report = build_execution_report(candidates=[repo], hf_status=HFModelStatus(status="not_found"))
 
-    assert report.what_breaks == "install path ambiguous"
-    assert report.technical_debt == "install path ambiguous"
+    assert _gap_labels(report) == ["install path ambiguous"]
+    assert report.gaps[0].category == "install"
+    assert report.gaps[0].evidence == "No setup.py, pyproject.toml, requirements.txt, or Dockerfile in repo root"
 
 
-def test_missing_weights_shown_only_when_repo_likely_depends_on_them() -> None:
+def test_missing_weights_gap_uses_new_label() -> None:
     repo = RepoCandidate(
         name="infer",
         full_name="org/infer",
@@ -137,8 +105,9 @@ def test_missing_weights_shown_only_when_repo_likely_depends_on_them() -> None:
 
     report = build_execution_report(candidates=[repo], hf_status=HFModelStatus(status="not_found"))
 
-    assert report.what_breaks == "checkpoint link absent"
-    assert "checkpoint provenance unclear" in report.technical_debt
+    assert _gap_labels(report) == ["weights/checkpoints not linked"]
+    assert report.gaps[0].category == "weights"
+    assert report.gaps[0].evidence == "README mentions weights/checkpoints but no download link found within 200 chars"
 
 
 def test_execution_path_commands_are_exposed_in_report() -> None:
@@ -164,10 +133,10 @@ def test_execution_path_commands_are_exposed_in_report() -> None:
     )
 
     assert report.execution_path == "install: pip install -r requirements.txt; run: python train.py; evaluate: python eval.py"
-    assert report.gaps == "None identified"
+    assert report.gaps == []
 
 
-def test_missing_execution_path_surfaces_clear_gap_text() -> None:
+def test_missing_execution_path_surfaces_structured_gap_text() -> None:
     repo = RepoCandidate(
         name="demo",
         full_name="org/demo",
@@ -184,11 +153,11 @@ def test_missing_execution_path_surfaces_clear_gap_text() -> None:
     report = build_execution_report(candidates=[repo], hf_status=HFModelStatus(status="unknown"))
 
     assert report.execution_path == "No extracted execution commands"
-    assert report.gaps == "install path ambiguous; no clear run command"
-    assert report.what_breaks == "install path ambiguous; no clear run command"
+    assert _gap_labels(report) == ["install path ambiguous", "no clear run command"]
+    assert [gap.category for gap in report.gaps] == ["install", "run"]
 
 
-def test_caution_report_stays_evidence_backed() -> None:
+def test_dataset_gap_has_structured_evidence() -> None:
     repo = RepoCandidate(
         name="demo",
         full_name="org/demo",
@@ -204,5 +173,6 @@ def test_caution_report_stays_evidence_backed() -> None:
 
     report = build_execution_report(candidates=[repo], hf_status=HFModelStatus(status="unknown"))
 
-    assert report.what_breaks == "dataset must be supplied manually"
-    assert report.technical_debt == "dataset bootstrap manual"
+    assert _gap_labels(report) == ["dataset must be supplied manually"]
+    assert report.gaps[0].category == "data"
+    assert "dataset/data setup" in report.gaps[0].evidence

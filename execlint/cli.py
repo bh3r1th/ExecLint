@@ -35,12 +35,10 @@ def audit(
         warning_text = "; ".join(dict.fromkeys(warnings))
         typer.secho(f"Warning: {warning_text}", fg=typer.colors.YELLOW, err=True)
 
-    typer.echo("paper:")
-    typer.echo(f"- Title: {debug_signals.get('paper_title') or 'None found'}")
-    typer.echo(f"- Repo URL: {execution_input.repo_url}")
-    _print_list("gaps", _split_report_items(report.gaps, empty="None identified"))
-    _print_list("what_breaks", _split_report_items(report.what_breaks, empty="No concrete blocker visible"))
-    _print_list("execution_path", _split_report_items(report.execution_path, empty="No extracted execution commands"))
+    typer.echo(f"Paper title: {report.paper_title}")
+    typer.echo(f"Repo URL: {report.repo_url}")
+    _print_gaps(report.gaps)
+    _print_list("EXECUTION PATH", _split_report_items(report.execution_path, empty="No extracted execution commands"))
 
     if debug:
         typer.echo("debug_signals:")
@@ -64,7 +62,14 @@ def _split_report_items(value: str | None, empty: str) -> list[str]:
 def _print_list(label: str, items: list[str]) -> None:
     typer.echo(f"{label}:")
     for item in items:
-        typer.echo(f"- {item}")
+        typer.echo(f"  - {item}")
+
+
+def _print_gaps(gaps: list) -> None:
+    typer.echo(f"GAPS ({len(gaps)}):")
+    for gap in gaps:
+        typer.echo(f"  - {gap.label}  [{gap.category}]")
+        typer.echo(f"    {gap.evidence}")
 
 
 def _build_parser() -> argparse.ArgumentParser:
