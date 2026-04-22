@@ -29,7 +29,7 @@ class GitHubClient:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         self._timeout = timeout
-        self._client = httpx.Client(base_url=GITHUB_API_BASE, headers=headers, timeout=timeout)
+        self._client = httpx.Client(base_url=GITHUB_API_BASE, headers=headers, timeout=timeout, follow_redirects=True)
 
     # Fix C1: close underlying httpx.Client to prevent resource/FD leaks
     def close(self) -> None:
