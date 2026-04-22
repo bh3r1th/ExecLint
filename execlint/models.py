@@ -52,14 +52,6 @@ class RepoCandidate(BaseModel):
     gaps: list[str] = Field(default_factory=list)
 
 
-class IssueFixSignal(BaseModel):
-    blocker: str
-    fix: str | None = None
-    confidence: Literal["low", "medium", "high"] = "low"
-    issue_number: int | None = None
-    blocker_category: str | None = None
-
-
 class HFModelStatus(BaseModel):
     status: Literal["found", "not_found", "unknown"]
     model_id: str | None = None

@@ -11,11 +11,6 @@
       "inferred_capabilities": ["inference"]
     }
   ],
-  "issue_signals_by_repo": {
-    "org/ready": [
-      {"blocker": "Minor CUDA note", "fix": "Use CUDA 12.1", "confidence": "low", "blocker_category": "env"}
-    ]
-  },
   "hf_status": {"status": "found", "model_id": "org/model"},
   "expected": {
     "verdict": "GO",

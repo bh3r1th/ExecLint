@@ -10,11 +10,6 @@
       "entrypoint_signals": ["demo.py"]
     }
   ],
-  "issue_signals_by_repo": {
-    "org/demo": [
-      {"blocker": "Fails on Python 3.12", "fix": "Use Python 3.10", "confidence": "medium", "blocker_category": "compat"}
-    ]
-  },
   "hf_status": {"status": "not_found"},
   "expected": {
     "verdict": "CAUTION",

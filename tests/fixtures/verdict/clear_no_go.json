@@ -10,11 +10,6 @@
       "entrypoint_signals": []
     }
   ],
-  "issue_signals_by_repo": {
-    "org/fragile": [
-      {"blocker": "Training script crashes", "confidence": "high", "blocker_category": "runtime"}
-    ]
-  },
   "hf_status": {"status": "not_found"},
   "expected": {
     "verdict": "NO-GO",

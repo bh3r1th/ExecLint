@@ -60,7 +60,6 @@ def test_orchestrator_returns_unknown_hf_on_hf_failure(monkeypatch) -> None:
         "execlint.orchestrator.triage_repositories",
         lambda candidates, github, ref=None: ([candidate], candidate),
     )
-    monkeypatch.setattr("execlint.orchestrator.mine_issue_signals", lambda repo, github: [])
     monkeypatch.setattr(
         "execlint.orchestrator.check_hf_status",
         lambda paper, hf_client, weights_url=None: (_ for _ in ()).throw(RuntimeError("hf down")),
@@ -71,36 +70,6 @@ def test_orchestrator_returns_unknown_hf_on_hf_failure(monkeypatch) -> None:
     assert report.verdict in {"GO", "CAUTION", "NO-GO"}
     assert report.hf_status == "Hugging Face status unavailable"
     assert any("Hugging Face lookup unavailable" in warning for warning in warnings)
-
-
-def test_orchestrator_issue_mining_failure_marks_fix_unavailable(monkeypatch) -> None:
-    paper = ArxivPaper(arxiv_id="2401.00001", url="https://arxiv.org/abs/2401.00001", title="Demo Paper")
-    candidate = RepoCandidate(
-        name="demo",
-        full_name="org/demo",
-        url="https://github.com/org/demo",
-        has_readme=True,
-        setup_signals=["requirements.txt", "pip_install"],
-        entrypoint_signals=["train.py"],
-        readiness_label="strong",
-    )
-
-    monkeypatch.setattr("execlint.orchestrator.ArxivClient.fetch_paper", lambda self, arxiv_id, url: paper)
-    monkeypatch.setattr("execlint.orchestrator.discover_repositories", lambda paper, github: [candidate])
-    monkeypatch.setattr("execlint.orchestrator.triage_repositories", lambda candidates, github, ref=None: ([candidate], candidate))
-    monkeypatch.setattr(
-        "execlint.orchestrator.mine_issue_signals",
-        lambda repo, github: (_ for _ in ()).throw(RuntimeError("issues down")),
-    )
-    monkeypatch.setattr(
-        "execlint.orchestrator.check_hf_status",
-        lambda paper, hf_client, weights_url=None: HFModelStatus(status="found", model_id="org/model", gated=False),
-    )
-
-    report, warnings = audit_arxiv_url("https://arxiv.org/abs/2401.00001")
-
-    assert report.fix == "Unavailable: issue mining failed"
-    assert any("GitHub issue mining unavailable" in warning for warning in warnings)
 
 
 def test_debug_payload_remains_compact_on_partial_results(monkeypatch) -> None:
@@ -122,7 +91,6 @@ def test_debug_payload_remains_compact_on_partial_results(monkeypatch) -> None:
     assert debug["selected_repo_name"] == "none"
     assert debug["selected_repo_readiness"] == "n/a"
     assert debug["selected_repo_blocker_severity"] == "low"
-    assert debug["selected_repo_fix_signal_count"] == 0
     assert debug["hf_summary"] in {"unclear", "missing", "found", "gated"}
 
 
@@ -145,7 +113,6 @@ def test_debug_payload_sets_blocker_severity_when_report_has_blockers(monkeypatc
         "execlint.orchestrator.triage_repositories",
         lambda candidates, github, ref=None: ([candidate], candidate),
     )
-    monkeypatch.setattr("execlint.orchestrator.mine_issue_signals", lambda repo, github: [])
     monkeypatch.setattr(
         "execlint.orchestrator.check_hf_status",
         lambda paper, hf_client, weights_url=None: HFModelStatus(status="unknown"),
@@ -192,7 +159,6 @@ def test_orchestrator_bypasses_repo_discovery_when_repo_url_provided(monkeypatch
         "execlint.orchestrator.triage_repositories",
         lambda candidates, github, ref=None: ([candidate], candidate),
     )
-    monkeypatch.setattr("execlint.orchestrator.mine_issue_signals", lambda repo, github: [])
     monkeypatch.setattr(
         "execlint.orchestrator.check_hf_status",
         lambda paper, hf_client, weights_url=None: HFModelStatus(status="unknown"),
@@ -231,8 +197,6 @@ def test_orchestrator_uses_provided_weights_and_preserves_repo_url(monkeypatch) 
         "execlint.orchestrator.triage_repositories",
         lambda candidates, github, ref=None: ([candidate], candidate),
     )
-    monkeypatch.setattr("execlint.orchestrator.mine_issue_signals", lambda repo, github: [])
-
     report, _, debug = audit_execution_input_with_debug(
         ExecutionInput(
             arxiv_url="https://arxiv.org/abs/2401.00001",

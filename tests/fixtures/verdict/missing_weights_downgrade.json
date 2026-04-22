@@ -10,11 +10,6 @@
       "entrypoint_signals": ["infer.py"]
     }
   ],
-  "issue_signals_by_repo": {
-    "org/patchy": [
-      {"blocker": "Config path mismatch", "fix": "Set --config configs/base.yaml", "confidence": "medium", "blocker_category": "config"}
-    ]
-  },
   "hf_status": {"status": "not_found"},
   "expected": {
     "verdict": "CAUTION",
