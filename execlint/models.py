@@ -61,8 +61,6 @@ class HFModelStatus(BaseModel):
 
 
 class ExecutionReport(BaseModel):
-    verdict: Literal["GO", "CAUTION", "NO-GO"]
-    tthw: Literal["Level 1", "Level 2", "Level 3", "Level 4"]
     best_repo: str
     runnable_for: str = "unclear"
     execution_path: str = "No extracted execution commands"

@@ -16,7 +16,6 @@ def test_orchestrator_continues_when_github_discovery_fails(monkeypatch) -> None
 
     report, warnings = audit_arxiv_url("https://arxiv.org/abs/1234.5678")
 
-    assert report.verdict == "NO-GO"
     assert report.best_repo == "None found"
     assert report.what_breaks == "Repository discovery unavailable"
     assert report.fix == "Unavailable: GitHub discovery failed"
@@ -38,7 +37,6 @@ def test_orchestrator_skips_hf_when_no_repo_candidates(monkeypatch) -> None:
 
     report, _ = audit_arxiv_url("https://arxiv.org/abs/2401.00001")
 
-    assert report.verdict == "NO-GO"
     assert report.hf_status == "Hugging Face status unclear"
 
 
@@ -67,7 +65,6 @@ def test_orchestrator_returns_unknown_hf_on_hf_failure(monkeypatch) -> None:
 
     report, warnings = audit_arxiv_url("https://arxiv.org/abs/2401.00001")
 
-    assert report.verdict in {"GO", "CAUTION", "NO-GO"}
     assert report.hf_status == "Hugging Face status unavailable"
     assert any("Hugging Face lookup unavailable" in warning for warning in warnings)
 

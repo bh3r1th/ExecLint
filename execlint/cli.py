@@ -6,13 +6,6 @@ from execlint.models import ExecutionInput
 from execlint.orchestrator import audit_execution_input_with_debug
 import typer
 
-TTHW_MEANINGS = {
-    "Level 1": "runnable immediately",
-    "Level 2": "minor setup required",
-    "Level 3": "substantial setup required",
-    "Level 4": "no credible runnable path",
-}
-
 
 def audit(
     arxiv_url: str,
@@ -44,18 +37,10 @@ def audit(
 
     typer.echo("paper:")
     typer.echo(f"- Title: {debug_signals.get('paper_title') or 'None found'}")
-    typer.echo(f"- Code URL: {execution_input.repo_url}")
-    typer.echo("execution_report:")
-    typer.echo(f"- Execution Path: {report.execution_path or 'No extracted execution commands'}")
-    typer.echo(f"- Runnable For: {report.runnable_for}")
-    typer.echo(f"- Gaps: {report.gaps or 'None identified'}")
-    typer.echo(f"- What Breaks: {report.what_breaks}")
-    typer.echo(f"- Technical Debt: {report.technical_debt}")
-    typer.echo(f"- Not Clearly Supported: {report.not_clearly_supported or 'None identified'}")
-    typer.echo(f"- HF Status: {report.hf_status}")
-    typer.echo(f"- Fix (if any): {report.fix}")
-    typer.echo(f"- Verdict: {report.verdict}")
-    typer.echo(f"- Time-to-Hello-World (TTHW): {report.tthw} — {TTHW_MEANINGS[report.tthw]}")
+    typer.echo(f"- Repo URL: {execution_input.repo_url}")
+    _print_list("gaps", _split_report_items(report.gaps, empty="None identified"))
+    _print_list("what_breaks", _split_report_items(report.what_breaks, empty="No concrete blocker visible"))
+    _print_list("execution_path", _split_report_items(report.execution_path, empty="No extracted execution commands"))
 
     if debug:
         typer.echo("debug_signals:")
@@ -66,6 +51,20 @@ def audit(
         typer.echo(f"- weights source: {debug_signals.get('weights_source') or 'none'}")
         failures = debug_signals.get("partial_source_failures", [])
         typer.echo(f"- partial failures: {', '.join(failures) if failures else 'none'}")
+
+
+def _split_report_items(value: str | None, empty: str) -> list[str]:
+    if not value:
+        return [empty]
+    if value == empty:
+        return [empty]
+    return [item.strip() for item in value.split(";") if item.strip()] or [empty]
+
+
+def _print_list(label: str, items: list[str]) -> None:
+    typer.echo(f"{label}:")
+    for item in items:
+        typer.echo(f"- {item}")
 
 
 def _build_parser() -> argparse.ArgumentParser:
