@@ -52,14 +52,6 @@ class RepoCandidate(BaseModel):
     gaps: list[str] = Field(default_factory=list)
 
 
-class IssueFixSignal(BaseModel):
-    blocker: str
-    fix: str | None = None
-    confidence: Literal["low", "medium", "high"] = "low"
-    issue_number: int | None = None
-    blocker_category: str | None = None
-
-
 class HFModelStatus(BaseModel):
     status: Literal["found", "not_found", "unknown"]
     model_id: str | None = None
@@ -68,18 +60,21 @@ class HFModelStatus(BaseModel):
     gated: bool | None = None
 
 
+class Gap(BaseModel):
+    label: str
+    category: Literal["install", "data", "weights", "run", "eval", "env"]
+    evidence: str
+
+
+ExecutionPath = str
+
+
 class ExecutionReport(BaseModel):
-    verdict: Literal["GO", "CAUTION", "NO-GO"]
-    tthw: Literal["Level 1", "Level 2", "Level 3", "Level 4"]
-    best_repo: str
-    runnable_for: str = "unclear"
-    execution_path: str = "No extracted execution commands"
-    gaps: str = "None identified"
-    not_clearly_supported: str = ""
-    what_breaks: str
-    fix: str
-    hf_status: str
-    technical_debt: str
+    paper_title: str
+    repo_url: str
+    gaps: list[Gap] = Field(default_factory=list)
+    execution_path: ExecutionPath = "No extracted execution commands"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ExecutionInput(BaseModel):

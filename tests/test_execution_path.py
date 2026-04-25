@@ -63,6 +63,50 @@ def test_detects_no_clear_run_command_gap() -> None:
     assert "no clear run command" in analysis.gaps
 
 
+def test_weights_mention_with_adjacent_hf_link_has_no_weights_gap() -> None:
+    analysis = analyze_execution_path(
+        readme_text="""
+        ## Model
+        Download pretrained weights from https://huggingface.co/org/model and place them in checkpoints/.
+        pip install -r requirements.txt
+        python demo.py
+        """,
+        paths=[],
+    )
+
+    assert "weights/checkpoints not linked" not in analysis.gaps
+
+
+def test_weights_mention_with_unrelated_hf_link_still_has_weights_gap() -> None:
+    analysis = analyze_execution_path(
+        readme_text="""
+        ## Assets
+        Download pretrained weights manually and place them in checkpoints/.
+
+        ## Citation
+        See our unrelated dataset card at https://huggingface.co/datasets/org/other for details.
+        pip install -r requirements.txt
+        python demo.py
+        """,
+        paths=[],
+    )
+
+    assert "weights/checkpoints not linked" in analysis.gaps
+
+
+def test_no_weights_mention_has_no_weights_gap() -> None:
+    analysis = analyze_execution_path(
+        readme_text="""
+        pip install -r requirements.txt
+        python demo.py
+        For docs, visit https://huggingface.co/org/model.
+        """,
+        paths=[],
+    )
+
+    assert "weights/checkpoints not linked" not in analysis.gaps
+
+
 def test_filters_non_command_lines_and_keeps_only_high_signal_commands() -> None:
     analysis = analyze_execution_path(
         readme_text="""

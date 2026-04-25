@@ -13,6 +13,11 @@ MANUAL_DATA_PATTERN = re.compile(
 MANUAL_WEIGHTS_PATTERN = re.compile(
     r"(?i)\b(weights?|checkpoints?)\b.*\b(download|provide|place|put|copy|manual|manually|obtain)\b|\b(manual|manually)\b.*\b(weights?|checkpoints?)\b"
 )
+DATA_MENTION_PATTERN = re.compile(r"(?i)\b(dataset|data)\b")
+WEIGHTS_MENTION_PATTERN = re.compile(r"(?i)\b(weights?|checkpoints?)\b")
+DOWNLOAD_LINK_PATTERN = re.compile(
+    r"(?i)(https?://|huggingface\.co/|drive\.google\.com|github\.com|zenodo\.org|figshare\.com|dropbox\.com|kaggle\.com)"
+)
 ENV_VERSION_PATTERN = re.compile(r"(?i)\b(python|cuda|pytorch|torch)\b[^.\n]{0,40}\b(>=|<=|==|~=|\d+\.\d+)")
 MAX_STEP_COUNT = 5
 MAX_COMMAND_LINES_FOR_LONG_BLOCK = 20
@@ -45,16 +50,18 @@ def analyze_execution_path(readme_text: str, paths: list[str]) -> ExecutionPathA
     has_install_command = bool(normalized_steps["install"])
     has_run_command = bool(normalized_steps["run"])
     has_eval_command = bool(normalized_steps["evaluate"])
-    mentions_data = bool(re.search(r"(?i)\b(dataset|data)\b", evidence_text))
-    mentions_weights = bool(re.search(r"(?i)\b(weights?|checkpoints?)\b", evidence_text))
+    mentions_data = bool(DATA_MENTION_PATTERN.search(evidence_text))
+    mentions_weights = bool(WEIGHTS_MENTION_PATTERN.search(evidence_text))
     has_env_versions = bool(ENV_VERSION_PATTERN.search(evidence_text))
+    data_has_adjacent_link = _mention_has_adjacent_download_link(DATA_MENTION_PATTERN, evidence_text)
+    weights_have_adjacent_link = _mention_has_adjacent_download_link(WEIGHTS_MENTION_PATTERN, evidence_text)
 
     if not has_install_command:
         gaps.append("install path ambiguous")
-    if mentions_data and (MANUAL_DATA_PATTERN.search(evidence_text) or "dataset" in lowered and "http" not in lowered):
+    if mentions_data and not data_has_adjacent_link and (MANUAL_DATA_PATTERN.search(evidence_text) or "dataset" in lowered):
         missing_prerequisites.append("dataset must be supplied manually")
         gaps.append("dataset must be supplied manually")
-    if mentions_weights and (MANUAL_WEIGHTS_PATTERN.search(evidence_text) or "checkpoint" in lowered and "http" not in lowered):
+    if mentions_weights and not weights_have_adjacent_link and (MANUAL_WEIGHTS_PATTERN.search(evidence_text) or "checkpoint" in lowered):
         missing_prerequisites.append("weights/checkpoints not linked")
         gaps.append("weights/checkpoints not linked")
     if not has_run_command:
@@ -70,6 +77,15 @@ def analyze_execution_path(readme_text: str, paths: list[str]) -> ExecutionPathA
         missing_prerequisites=sorted(dict.fromkeys(missing_prerequisites)),
         gaps=sorted(dict.fromkeys(gaps)),
     )
+
+
+def _mention_has_adjacent_download_link(mention_pattern: re.Pattern[str], readme_text: str) -> bool:
+    for match in mention_pattern.finditer(readme_text or ""):
+        following_paragraph = re.split(r"\n\s*\n", readme_text[match.end() :], maxsplit=1)[0]
+        following = following_paragraph[:200]
+        if DOWNLOAD_LINK_PATTERN.search(following):
+            return True
+    return False
 
 
 def _extract_commands(readme_text: str) -> list[str]:
