@@ -1,0 +1,46 @@
+C:\Users\vanda\anaconda3\Lib\site-packages\pydantic\_internal\_fields.py:132: UserWarning: Field "model_id" in HFModelStatus has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+Running ExecLint on 40 papers -> C:\Users\vanda\OneDrive\Desktop\ExecLint\eval\results\v2_run_20260425.jsonl
+[01/40] OK  2601.10064 gaps=0 dur=2.363s 
+[02/40] OK  2601.10120 gaps=1 dur=2.851s 
+[03/40] OK  2601.10124 gaps=1 dur=2.598s 
+[04/40] OK  2601.10156 gaps=0 dur=2.699s 
+[05/40] OK  2601.10272 gaps=2 dur=2.998s 
+[06/40] OK  2601.10403 gaps=3 dur=2.992s 
+[07/40] OK  2601.10477 gaps=1 dur=2.859s 
+[08/40] OK  2601.10497 gaps=1 dur=3.187s 
+[09/40] OK  2601.10649 gaps=3 dur=2.708s 
+[10/40] OK  2601.11655 gaps=0 dur=3.017s 
+[11/40] OK  2601.10712 gaps=0 dur=2.924s 
+[12/40] OK  2601.10802 gaps=3 dur=3.217s 
+[13/40] OK  2601.10880 gaps=2 dur=3.073s 
+[14/40] OK  2601.15316 gaps=3 dur=2.678s 
+[15/40] OK  2601.11035 gaps=4 dur=3.347s 
+[16/40] OK  2601.11077 gaps=1 dur=3.088s 
+[17/40] OK  2601.11141 gaps=1 dur=2.604s 
+[18/40] OK  2601.11227 gaps=1 dur=2.583s 
+[19/40] OK  2601.11255 gaps=1 dur=2.587s 
+[20/40] OK  2601.11522 gaps=0 dur=2.464s 
+[21/40] OK  2601.11888 gaps=0 dur=2.56s 
+[22/40] OK  2601.11981 gaps=1 dur=2.875s 
+[23/40] OK  2601.15322 gaps=1 dur=2.409s 
+[24/40] OK  2601.12530 gaps=1 dur=2.975s 
+[25/40] OK  2601.12538 gaps=3 dur=3.313s 
+[26/40] OK  2601.12626 gaps=1 dur=3.241s 
+[27/40] OK  2601.12736 gaps=0 dur=2.989s 
+[28/40] OK  2601.12991 gaps=2 dur=3.599s 
+[29/40] OK  2601.13029 gaps=1 dur=4.422s 
+[30/40] OK  2601.13096 gaps=1 dur=3.625s 
+[31/40] OK  2601.13240 gaps=1 dur=6.607s 
+[32/40] OK  2601.13304 gaps=1 dur=3.061s 
+[33/40] OK  2601.13534 gaps=1 dur=2.457s 
+[34/40] OK  2601.13677 gaps=2 dur=2.568s 
+[35/40] OK  2601.14327 gaps=1 dur=3.116s 
+[36/40] OK  2601.13761 gaps=2 dur=2.575s 
+[37/40] OK  2601.13776 gaps=0 dur=2.494s 
+[38/40] OK  2601.13798 gaps=0 dur=2.511s 
+[39/40] OK  2601.13836 gaps=2 dur=2.915s 
+[40/40] OK  2601.13886 gaps=3 dur=2.409s 
+Done. Wrote C:\Users\vanda\OneDrive\Desktop\ExecLint\eval\results\v2_run_20260425.jsonl
